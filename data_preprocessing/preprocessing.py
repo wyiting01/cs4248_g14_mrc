@@ -169,10 +169,10 @@ def main(args):
     dataset = data_from_json(args.file_path)
     if args.train:
         context, question, answer, answer_span = preprocess_and_write(dataset)
-        write_to_file('\n'.join(context), "train_data/context")
-        write_to_file('\n'.join(question), "train_data/question")
-        write_to_file('\n'.join(answer), "train_data/answer")
-        write_to_file('\n'.join(answer_span), "train_data/answer_span")
+        write_to_file('\n'.join(context), "training_data/context")
+        write_to_file('\n'.join(question), "training_data/question")
+        write_to_file('\n'.join(answer), "training_data/answer")
+        write_to_file('\n'.join(answer_span), "training_data/answer_span")
     elif args.test:
         context, question, answer, answer_span = preprocess_and_write(dataset)
         write_to_file('\n'.join(context), "test_data/context")
@@ -183,8 +183,8 @@ def main(args):
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_path', help='path to the json file for training or testing')
-    parser.add_argument('--train', default=False, action='store_true', help='train the model')
-    parser.add_argument('--test', default=False, action='store_true', help='test the model')
+    parser.add_argument('--train', default=False, action='store_true', help='training data')
+    parser.add_argument('--test', default=False, action='store_true', help='testing data')
     return parser.parse_args()
 
 if __name__ == "__main__":
