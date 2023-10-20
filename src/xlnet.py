@@ -98,7 +98,7 @@ class SquadDataset(Dataset):
         """
         Return the number of instances in the data
         """
-        return len(self.questions)
+        return len(self.input_ids)
 
     def __getitem__(self, i):
 
