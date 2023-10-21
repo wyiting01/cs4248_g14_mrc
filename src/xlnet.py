@@ -215,23 +215,104 @@ def test_one(model, dataset, n_best_size=20, max_answer_length=30, device='cpu')
         valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
     return valid_answers
 
+def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
+    model.eval()
+
+    test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
+
+    pred = {}
+
+    with torch.no_grad():
+        for data in test_dataloader:
+            input_ids = data["input_ids"].to(device)
+            attention_mask = data["attention_mask"].to(device)
+            start = data["start_positions"].to(device)
+            end = data["end_positions"].to(device)
+            output = model(input_ids=input_ids, attention_mask=attention_mask)
+
+            offset_mapping = data["offset_mapping"]
+            context = data["og_contexts"]
+            answer = data["og_answers"]
+            question = data["og_questions"]
+
+            for i in range(len(input_ids)):
+
+                start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
+                end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
+                start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
+                end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
+
+                start_top_indexes = output.start_top_index
+                end_top_indexes = output.end_top_index
+
+
+                offsets = offset_mapping[i]
+                ctxt = context[i]
+
+                valid_answers = []
+                for start in start_indexes:
+                    for end in end_indexes:
+                        start_index = start_top_indexes[start]
+                        end_index = end_top_indexes[end]
+                        # Don't consider out-of-scope answers, either because the indices are out of bounds or correspond
+                        # to part of the input_ids that are not in the context.
+                        if (
+                            start_index >= len(offsets)
+                            or end_index >= len(offsets)
+                            or offsets[start_index] is None
+                            or offsets[end_index] is None
+                        ):
+                            continue
+                        # Don't consider answers with a length that is either < 0 or > max_answer_length.
+                        if end_index < start_index or end_index - start_index + 1 > max_answer_length:
+                            continue
+                        if start_index <= end_index: # We need to refine that test to check the answer is inside the context
+                            start_char = offsets[start_index][0]
+                            end_char = offsets[end_index][1]
+                            valid_answers.append(
+                                {
+                                    "score": start_logits[start] + end_logits[end],
+                                    "text": ctxt[start_char: end_char]
+                                }
+                            )
+
+                valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
+                if len(valid_answers) == 0:
+                    pred[answer[i]] = ""
+                else:
+                    pred[answer[i]] = valid_answers[0]['text']
+
+    return pred
+
 def main(args):
-    input_path = args.input_path
+    train_path, test_path, model_path, output_path = args.train_path, args.test_path, args.model_path, args.output_path
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    squad = SquadDataset(input_path)
+    squad_train = SquadDataset(train_path)
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
 
     # train the model
-    train(model=model, dataset=squad, num_epoch=1, batch_size=16, device=device)
+    train(model=model, dataset=squad_train, num_epoch=1, batch_size=16, device=device, model_path = model_path)
 
     # test the model (to be modified from trg data to test data)
-    test_outputs = test_one(model=model, dataset=squad, n_best_size=20, max_answer_length=30, device=device)
-    print(test_outputs)
+    checkpoint = torch.load(model_path)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    squad_test = SquadDataset(test_path)
+    test_output = test(model, dataset=squad_test, device=device)
+    print(test_output)
+
+    # ls = []
+    # for key, val in test_output.items():
+    #     ls.append(key + "\t" + val)
+    # with open(output_path, 'w', encoding='utf-8') as f:
+    #     f.write('\n'.join(ls))
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_path', help='path to the text file')
+    parser.add_argument('--train_path', help='path to the text file')
+    parser.add_argument('--test_path', help='path to the text file')
+    parser.add_argument('--model_path', help='path to save trained model')
+    parser.add_argument('--output_path', help='path to model_prediction')
     return parser.parse_args()
 
 if __name__ == "__main__":
