@@ -98,22 +98,24 @@ class SquadDataset(Dataset):
         """
         Return the number of instances in the data
         """
-        return len(self.input_ids)
+        return len(self.sample_mapping)
 
     def __getitem__(self, i):
 
         og_index = self.sample_mapping[i]
-    
+
         item_dict = {
             "input_ids": torch.tensor(self.input_ids[i]),
             "attention_mask" : torch.tensor(self.attention_mask[i]),
             "start_positions" : torch.tensor(self.tokenizer_dict["start_positions"][i]),
             "end_positions" : torch.tensor(self.tokenizer_dict["end_positions"][i]),
+            "og_indices": og_index,
             "og_contexts": self.contexts[og_index],
             "og_questions": self.questions[og_index],
             "og_answers": self.answers[og_index],
             "og_start_indices": self.start_indices[og_index],
-            "og_end_indices": self.end_indices[og_index]
+            "og_end_indices": self.end_indices[og_index],
+            "offset_mapping": torch.tensor(self.offset_mapping[i])
 
         }
         return item_dict
@@ -177,44 +179,40 @@ def test_one(model, dataset, n_best_size=20, max_answer_length=30, device='cpu')
         attention_mask = one_batch["attention_mask"].to(device)
         start = one_batch["start_positions"].to(device)
         end = one_batch["end_positions"].to(device)
+        og_index = one_batch["og_indices"]
+        context = one_batch["og_contexts"][0]
+        offset_mapping = one_batch["offset_mapping"][0]
+
         output = model(input_ids=input_ids, attention_mask=attention_mask)
 
-    start_logits = output.start_top_index[0].cpu().numpy()
-    end_logits = output.end_top_index[0].cpu().numpy()
-    start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
-    end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
+        start_logits = output.start_top_log_probs[0].cpu().detach().numpy()
+        end_logits = output.end_top_log_probs[0].cpu().detach().numpy()
+        start_indexes = output.start_top_index[0].cpu().numpy()
+        end_indexes = output.end_top_index[0].unique_consecutive().cpu().numpy()
 
-    offset_mapping = dataset.offset_mapping[0]
-    context = dataset.contexts[0]
-
-    valid_answers = []
-    for start in start_indexes:
-        for end in end_indexes:
-            start_index = start_logits[start]
-            end_index = end_logits[end]
-            # Don't consider out-of-scope answers, either because the indices are out of bounds or correspond
-            # to part of the input_ids that are not in the context.
-            if (
-                start_index >= len(offset_mapping)
-                or end_index >= len(offset_mapping)
-                or offset_mapping[start_index] is None
-                or offset_mapping[end_index] is None
-            ):
-                continue
-            # Don't consider answers with a length that is either < 0 or > max_answer_length.
-            if end_index < start_index or end_index - start_index + 1 > max_answer_length:
-                continue
-            if start_index <= end_index: # We need to refine that test to check the answer is inside the context
-                start_char = offset_mapping[start_index][0]
-                end_char = offset_mapping[end_index][1]
-                valid_answers.append(
-                    {
-                        "score": start_logits[start] + end_logits[end],
-                        "text": context[start_char: end_char]
-                    }
-                )
-
-    valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
+        valid_answers=[]
+        for i, start_index in enumerate(start_indexes):
+            for j, end_index in enumerate(end_indexes):
+                if (
+                    start_index >= len(offset_mapping)
+                    or end_index >= len(offset_mapping)
+                    or offset_mapping[start_index] is None
+                    or offset_mapping[end_index] is None
+                ):
+                    continue
+                # Don't consider answers with a length that is either < 0 or > max_answer_length.
+                if end_index < start_index or end_index - start_index + 1 > max_answer_length:
+                    continue
+                if start_index <= end_index: # We need to refine that test to check the answer is inside the context
+                    start_char = offset_mapping[start_index][0]
+                    end_char = offset_mapping[end_index][1]
+                    valid_answers.append(
+                        {
+                            "score": start_logits[i] + end_logits[j],
+                            "text": context[start_char: end_char]
+                        }
+                    )
+        valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
     return valid_answers
 
 def main(args):
@@ -225,10 +223,10 @@ def main(args):
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
 
     # train the model
-    train(model, squad, num_epoch=1, batch_size=16, device=device)
+    train(model=model, dataset=squad, num_epoch=1, batch_size=16, device=device)
 
     # test the model (to be modified from trg data to test data)
-    test_outputs = test_one(model, dataset=squad, device=device)
+    test_outputs = test_one(model=model, dataset=squad, n_best_size=20, max_answer_length=30, device=device)
     print(test_outputs)
 
 def get_arguments():
