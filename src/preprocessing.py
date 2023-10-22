@@ -1,10 +1,10 @@
 """
-The prepocessing function will read in the train and dev json file and extracts the context, question, answer text and answer span (start and end indices in term of character) and save them into different file separated by a tab.
+The preprocessing function will read in the train and dev json file and extracts the context, question, answer text and answer span (start and end indices in term of character) and save them into different file separated by a tab.
 
 To run the file in root directory, use the following commands
 
-python preprocess/preprocessing.py --file_path "data/original_data/train-v1.1.json" --train
-python preprocess/preprocessing.py --file_path "data/original_data/dev-v1.1.json" --test
+python preprocess/preprocessing.py --file_path "data/raw/train-v1.1.json" --train
+python preprocess/preprocessing.py --file_path "data/raw/dev-v1.1.json" --test
 """
 
 import argparse
@@ -63,16 +63,16 @@ def main(args):
     dataset = data_from_json(args.file_path)
     if args.train:
         context, question, answer, answer_span = preprocess_and_write(dataset)
-        write_to_file('\t'.join(context), "data/training_data/context")
-        write_to_file('\t'.join(question), "data/training_data/question")
-        write_to_file('\t'.join(answer), "data/training_data/answer")
-        write_to_file('\t'.join(answer_span), "data/training_data/answer_span")
+        write_to_file('\t'.join(context), "data/curated/training_data/context")
+        write_to_file('\t'.join(question), "data/curated/training_data/question")
+        write_to_file('\t'.join(answer), "data/curated/training_data/answer")
+        write_to_file('\t'.join(answer_span), "data/curated/training_data/answer_span")
     elif args.test:
         context, question, answer, answer_span = preprocess_and_write(dataset)
-        write_to_file('\t'.join(context), "data/test_data/context")
-        write_to_file('\t'.join(question), "data/test_data/question")
-        write_to_file('\t'.join(answer), "data/test_data/answer")
-        write_to_file('\t'.join(answer_span), "data/test_data/answer_span")
+        write_to_file('\t'.join(context), "data/curated/test_data/context")
+        write_to_file('\t'.join(question), "data/curated/test_data/question")
+        write_to_file('\t'.join(answer), "data/curated/test_data/answer")
+        write_to_file('\t'.join(answer_span), "data/curated/test_data/answer_span")
     
 def get_arguments():
     parser = argparse.ArgumentParser()
