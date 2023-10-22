@@ -242,8 +242,8 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
                 end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
 
-                start_top_indexes = output.start_top_index
-                end_top_indexes = output.end_top_index
+                start_top_indexes = output.start_top_index[i]
+                end_top_indexes = output.end_top_index[i]
 
 
                 offsets = offset_mapping[i]
@@ -295,10 +295,10 @@ def main(args):
     train(model=model, dataset=squad_train, num_epoch=1, batch_size=16, device=device, model_path = model_path)
 
     # test the model (to be modified from trg data to test data)
-    checkpoint = torch.load(model_path)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    squad_test = SquadDataset(test_path)
-    test_output = test(model, dataset=squad_test, device=device)
+    # checkpoint = torch.load(model_path)
+    # model.load_state_dict(checkpoint["model_state_dict"])
+    # squad_test = SquadDataset(test_path)
+    test_output = test(model, dataset=squad_train, device=device)
     print(test_output)
 
     # ls = []
