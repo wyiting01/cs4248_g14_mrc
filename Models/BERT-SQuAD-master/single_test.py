@@ -6,6 +6,8 @@ To run file: python3 single_test.py
 doc: Context provided. Change context for other testing
 
 q: Question provided. Change question for other testing.
+
+output: dictionary containing the answer(text), answer(span), confidence (probability) and the document (context)
 """
 from bert import QA
 
