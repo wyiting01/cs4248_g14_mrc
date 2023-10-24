@@ -9,6 +9,8 @@ from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
 
+torch.manual_seed(4248)
+
 class SquadDataset(Dataset):
 
     def __init__(self, input_path):
@@ -32,7 +34,7 @@ class SquadDataset(Dataset):
         self.spans = [span.strip().split() for span in spans]#[:10]
         self.start_indices = [int(x[0]) for x in self.spans]
         self.end_indices = [int(x[1]) for x in self.spans]
-        self.qids = [qid.strip() for qid in qids]
+        self.qids = [qid.strip() for qid in qids]#[:10]
 
         self.tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
         self.tokenizer.padding_side = "right"
@@ -246,30 +248,46 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     return pred
 
 def main(args):
-    train_path, test_path, model_path, output_path = args.train_path, args.test_path, args.model_path, args.output_path
+    
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    squad_train = SquadDataset(train_path)
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
 
-    # train the model
-    train(model=model, dataset=squad_train, num_epoch=2, batch_size=16, device=device, model_path = model_path)
+    if args.train:
+        train_path, model_path = args.data_path, args.model_path
+        squad_train = SquadDataset(train_path)
 
-    # test the model (to be modified from trg data to test data)
-    checkpoint = torch.load(model_path)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    squad_test = SquadDataset(test_path)
-    test_output = test(model, dataset=squad_test, device=device)
+        # specify hyperparameters
+        num_epoch = 2
+        batch_size = 16
+        learning_rate = 5e-5
 
-    with open(output_path, 'w') as f:
-        json.dump(test_output, f)
+        # train the model
+        train(model=model, dataset=squad_train, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=model_path)
+    
+    if args.test:
+        test_path, model_path, output_path = args.data_path, args.model_path, args.output_path
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        squad_test = SquadDataset(test_path)
+
+        # specify hyperparameter
+        n_best_size = 20
+        max_answer_length = 30
+
+        # use trained model to make predictions
+        test_output = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
+    
+        # writing model prediction into json file
+        with open(output_path, 'w') as f:
+            json.dump(test_output, f)
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_path', help='path to the text file')
-    parser.add_argument('--test_path', help='path to the text file')
+    parser.add_argument('--train', default=False, action='store_true', help='train the model')
+    parser.add_argument('--test', default=False, action='store_true', help='test the model')
+    parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--model_path', help='path to save trained model')
-    parser.add_argument('--output_path', help='path to model_prediction')
+    parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
     return parser.parse_args()
 
 if __name__ == "__main__":
