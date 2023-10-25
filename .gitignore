@@ -2,4 +2,12 @@
 # This .gitignore file was automatically created by Microsoft(R) Visual Studio.
 ################################################################################
 
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Miscellaneous
+.DS_Store
 /.vs/VSWorkspaceState.json
+
+# Model Checkpoints
+*.pt

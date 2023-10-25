@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import json
 import numpy as np
 import torch
 import torch.nn as nn
@@ -22,6 +23,8 @@ class SquadDataset(Dataset):
             answers = f.read().split("\t")
         with open(input_path + "/answer_span", encoding='utf-8') as f:
             spans = f.read().split("\t")
+        with open(input_path + "/question_id", encoding='utf-8') as f:
+            qids = f.read().split("\t")
 
         self.contexts = [ctx.strip() for ctx in contexts]#[:10]
         self.questions = [qn.strip() for qn in questions]#[:10]
@@ -29,6 +32,7 @@ class SquadDataset(Dataset):
         self.spans = [span.strip().split() for span in spans]#[:10]
         self.start_indices = [int(x[0]) for x in self.spans]
         self.end_indices = [int(x[1]) for x in self.spans]
+        self.qids = [qid.strip() for qid in qids]
 
         self.tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
         self.tokenizer.padding_side = "right"
@@ -115,7 +119,8 @@ class SquadDataset(Dataset):
             "og_answers": self.answers[og_index],
             "og_start_indices": self.start_indices[og_index],
             "og_end_indices": self.end_indices[og_index],
-            "offset_mapping": torch.tensor(self.offset_mapping[i])
+            "offset_mapping": torch.tensor(self.offset_mapping[i]),
+            "og_question_ids": self.qids[og_index]
 
         }
         return item_dict
@@ -157,63 +162,17 @@ def train(model, dataset, batch_size=16, learning_rate=5e-5, num_epoch=10, devic
 
     end = datetime.datetime.now()
 
-    # checkpoint = {
-    #     'epoch': num_epoch,
-    #     'lr': learning_rate,
-    #     'batch_size': batch_size,
-    #     'model_state_dict': model.state_dict(),
-    #     'optimizer_state_dict': optimizer.state_dict()
-    # }
-    # torch.save(checkpoint, model_path)
+    checkpoint = {
+        'epoch': num_epoch,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+    torch.save(checkpoint, model_path)
 
-    # print('Model saved in ', model_path)
+    print('Model saved in ', model_path)
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
-
-def test_one(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
-    test_dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-    one_batch = next(iter(test_dataloader))
-
-    model.eval()
-    with torch.no_grad():
-        input_ids = one_batch["input_ids"].to(device)
-        attention_mask = one_batch["attention_mask"].to(device)
-        start = one_batch["start_positions"].to(device)
-        end = one_batch["end_positions"].to(device)
-        og_index = one_batch["og_indices"]
-        context = one_batch["og_contexts"][0]
-        offset_mapping = one_batch["offset_mapping"][0]
-
-        output = model(input_ids=input_ids, attention_mask=attention_mask)
-
-        start_logits = output.start_top_log_probs[0].cpu().detach().numpy()
-        end_logits = output.end_top_log_probs[0].cpu().detach().numpy()
-        start_indexes = output.start_top_index[0].cpu().numpy()
-        end_indexes = output.end_top_index[0].unique_consecutive().cpu().numpy()
-
-        valid_answers=[]
-        for i, start_index in enumerate(start_indexes):
-            for j, end_index in enumerate(end_indexes):
-                if (
-                    start_index >= len(offset_mapping)
-                    or end_index >= len(offset_mapping)
-                    or offset_mapping[start_index] is None
-                    or offset_mapping[end_index] is None
-                ):
-                    continue
-                # Don't consider answers with a length that is either < 0 or > max_answer_length.
-                if end_index < start_index or end_index - start_index + 1 > max_answer_length:
-                    continue
-                if start_index <= end_index: # We need to refine that test to check the answer is inside the context
-                    start_char = offset_mapping[start_index][0]
-                    end_char = offset_mapping[end_index][1]
-                    valid_answers.append(
-                        {
-                            "score": start_logits[i] + end_logits[j],
-                            "text": context[start_char: end_char]
-                        }
-                    )
-        valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
-    return valid_answers
 
 def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     model.eval()
@@ -234,6 +193,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
             context = data["og_contexts"]
             answer = data["og_answers"]
             question = data["og_questions"]
+            qids = data["og_question_ids"]
 
             for i in range(len(input_ids)):
 
@@ -248,6 +208,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
                 offsets = offset_mapping[i]
                 ctxt = context[i]
+                qid = qids[i]
 
                 valid_answers = []
                 for start in start_indexes:
@@ -278,9 +239,9 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
                 valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
                 if len(valid_answers) == 0:
-                    pred[answer[i]] = ""
+                    pred[qid] = ""
                 else:
-                    pred[answer[i]] = valid_answers[0]['text']
+                    pred[qid] = valid_answers[0]['text']
 
     return pred
 
@@ -292,20 +253,16 @@ def main(args):
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
 
     # train the model
-    train(model=model, dataset=squad_train, num_epoch=1, batch_size=16, device=device, model_path = model_path)
+    train(model=model, dataset=squad_train, num_epoch=2, batch_size=16, device=device, model_path = model_path)
 
     # test the model (to be modified from trg data to test data)
-    # checkpoint = torch.load(model_path)
-    # model.load_state_dict(checkpoint["model_state_dict"])
+    checkpoint = torch.load(model_path)
+    model.load_state_dict(checkpoint["model_state_dict"])
     squad_test = SquadDataset(test_path)
     test_output = test(model, dataset=squad_test, device=device)
-    print(test_output)
 
-    # ls = []
-    # for key, val in test_output.items():
-    #     ls.append(key + "\t" + val)
-    # with open(output_path, 'w', encoding='utf-8') as f:
-    #     f.write('\n'.join(ls))
+    with open(output_path, 'w') as f:
+        json.dump(test_output, f)
 
 def get_arguments():
     parser = argparse.ArgumentParser()
