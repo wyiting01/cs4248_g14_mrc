@@ -1,19 +1,34 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import argparse
+import contractions
+import copy
 import datetime
 import numpy as np
 import os
 import random
+import requests
+import sys
 import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import tensorflow as tf
 
-from gensim.models import Word2Vec
-from tensorflow import keras
-from keras.preprocessing.sequence import pad_sequences
-from keras.preprocessing.text import Tokenizer
-from sklearn.model_selection import StratifiedKFold
+from torch.nn.utils.rnn import pad_sequence
+from sklearn.model_selection import RepeatedKFold
 from torch.utils.data import Dataset, DataLoader
+from transformers import BertTokenizerFast, BertModel
+
+'''
+Need to install libraries for numpy, contractions, sklearn, transformers:
+
+pip install numpy
+pip install contractions
+pip install -U scikit-learn
+pip install transformers
+
+To run, use command: python3 Models/biLSTM.py --input_path data/curated/training_data/
+'''
 
 # Pytorch version: Adapted from https://www.kaggle.com/code/mlwhiz/bilstm-pytorch-and-keras
 
@@ -23,9 +38,17 @@ max_features = 100000
 maxQnLen = 80
 batch_size = 64
 num_epochs = 10
+num_splits = 2
 hidden_size = 128
 seed = 0
 dropout = 0.1
+learning_rate = 0.001
+
+#puncts = ['~', '`', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '-', '+', '=', '[', ']', '{', '}', '\\', "\|", ':', ';', '\'', '\"', '<', ',', '>', '.', '?', '/']
+
+# Adapted from: https://stackoverflow.com/questions/42329766/python-nlp-british-english-vs-american-english
+url ="https://raw.githubusercontent.com/hyperreality/American-British-English-Translator/master/data/american_spellings.json"
+american_to_british_dict = requests.get(url).json()
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -35,229 +58,272 @@ def seed_all(seed=0):
     torch.backends.cudnn.deterministic = True
 
 class biLSTMDataset(Dataset):
-    def __init__(self, input_path, isTraining=False):
-        # Initialise training set.
-        context = input_path + "/context"
-        questions = input_path + "/question"
-        answers = input_path + "/answer"
-        answer_spans = input_path + "/answer_span"
+    def __init__(self, x=None, y=None, input_path="", isTraining=False):
+        if input_path != "":
+            self.isDatasetAvail = False
 
-        self.context = extractData(context)
-        self.questions = extractData(questions)
-        self.answers = extractData(answers)
-        self.answer_spans = extractData(answer_spans)
+            # Initialise training set.
+            context = input_path + "/context"
+            questions = input_path + "/question"
+            answers = input_path + "/answer"
+            answer_spans = input_path + "/answer_span"
 
-        X_train = self.context + self.questions
+            print('Initialising dataset')
 
-        # Tokenise sentences.
-        tokeniser = Tokenizer(num_words=max_features)
-        # Since input is text.
-        tokeniser.fit_on_texts(X_train)
+            self.contexts = self.extractAndCleanData(context)[:100]
+            self.questions = self.extractAndCleanData(questions)[:100]
+            self.answers = self.extractAndCleanData(answers)[:100]
+            self.answer_spans = self.extractAndCleanData(answer_spans)[:100]
 
-        X_train = tokenizer.texts_to_sequences(X_train)
+            self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
-        # Pad the sentences.
-        X_train = pad_sequences(X_train, maxlen=maxQnLen)
+            print('Tokenising texts')
 
-        self.text_vocab = X_train
+            self.encodings = self.tokenizer(self.contexts, self.questions, truncation=True, padding=True, return_tensors="pt")
 
-        target_labels = [[0]* len(seq) for seq in X_train]
-        for i in range(len(target_labels)):
-            start_index, end_index = self.answer_spans[i][0], self.answer_spans[i][1]
-            target_labels[i][start_index:end_index + 1] = [1] * (end_index - start_index + 1)
-        
-        self.labels_vocab = target_labels
-        
-    def extractData(file_path):
-        with open(file_path, "r") as file:
-            data = file.read().split("\t")
-        newDataset = [line.strip() for line in data]
+            print('Tokenising complete')
+
+            print('Tokenising targets')
+
+            self.start_positions = []
+            self.end_positions = []
+
+            for i, (context, answer) in enumerate(zip(self.contexts, self.answers)):
+                answer_start_idx = context.find(answer)
+                answer_end_idx = answer_start_idx + len(answer) - 1
+                start_position = self.char_to_token_position(i, answer_start_idx)
+                end_position = self.char_to_token_position(i, answer_end_idx)
+                self.start_positions.append(start_position)
+                self.end_positions.append(end_position)
+        else:
+            self.isDatasetAvail = True
+            self.x = x
+            self.y = y
+
+    def char_to_token_position(self, idx, char_position):
+        # return len(self.tokenizer.encode(self.contexts[idx][:char_position]))
+        tokens_info = self.tokenizer.encode_plus(self.contexts[idx], add_special_tokens=True, return_offsets_mapping=True)
+        offsets = tokens_info['offset_mapping']
+    
+        for token_pos, (start, end) in enumerate(offsets):
+            if char_position >= start and char_position < end:
+                return token_pos
+        print("Error in span")
+
+        # Cannot return None if using k-fold validations.
+        return len(offsets)
+
+    def extractAndCleanData(self, file_path):
+        with open(file_path, "r", encoding='utf-8') as file:
+            data = file.read().split('\t')
+        print('Cleaning dataset')
+        newDataset = [self.clean_text(line.strip()) for line in data]
         return newDataset
 
-    def __getitem__(self, index):
-        data, target = self.text_vocab[index], self.labels_vocab[index]
-        return data, target
+    # Clean up input text to be more standardised (spelling & word form) and decrease dictionary size.
+    # Note: Due to nature of questions & answers, cannot remove all special characters as they are present in them.
+    def clean_text(self, text):
+        text = text.lower()
 
-    def __len__(self):
-        return len(self.questions)
+        # Clean non-ASCII dashes.
+        text = self.clean_dashes(text)
+        text = self.clean_contractions(text)
+        text = contractions.fix(text)
 
-    '''
-    Unused but possibly useful pre-processing functions to increase accuracy.
-    def known_contractions(embed):
-        known = []
-        for contract in contraction_mapping:
-            if contract in embed:
-                known.append(contract)
-        return known
+        text = self.correct_spelling(text, american_to_british_dict)
 
-    def clean_contractions(text, mapping):
-        specials = ["’", "‘", "´", "`"]
+        return text
+
+    def clean_dashes(self, text):
+        text = text.replace(u'\u2013', '-')
+        return text
+
+    # Remove non-ASCII quotes.
+    def clean_contractions(self, text):
+        # For non-ASCII quotation marks.
+        specials = [u'\u2018', u'\u2019', u'\u00B4', u'\u0060']
         for s in specials:
             text = text.replace(s, "'")
-        text = ' '.join([mapping[t] if t in mapping else t for t in text.split(" ")])
         return text
 
-    def correct_spelling(x, dic):
-        for word in dic.keys():
-            x = x.replace(word, dic[word])
-        return x
-
-    def unknown_punct(embed, punct):
-        unknown = ''
-        for p in punct:
-            if p not in embed:
-                unknown += p
-                unknown += ' '
-        return unknown
-
-    def clean_special_chars(text, punct, mapping):
-        for p in mapping:
-            text = text.replace(p, mapping[p])
-    
-        for p in punct:
-            text = text.replace(p, f' {p} ')
-    
+    def correct_spelling(self, text, dic):
+        words = text.split()
+        for i in range(len(words)):
+            if words[i] not in dic.keys():
+                continue
+            else:
+                words[i] = american_to_british_dict[words[i]]
+        text = ' '.join(words)
         return text
 
-    def add_lower(embedding, vocab):
-        count = 0
-        for word in vocab:
-            if word in embedding and word.lower() not in embedding:
-                embedding[word.lower()] = embedding[word]
-                count += 1
-        print(f"Added {count} words to embedding")
+    def get_texts_and_questions(self):
+        return self.encodings["input_ids"]
 
-    puncts = [',', '.', '"', ':', ')', '(', '-', '!', '?', '|', ';', "'", '$', '&', '/', '[', ']', '>', '%', '=', '#', '*', '+', '\\', '•',  '~', '@', '£', 
-     '·', '_', '{', '}', '©', '^', '®', '`',  '<', '°', '€', '›', '?', '?', '?', 'Â', '½', 'à', '…', 
-     '“', '”', '–', 'â', '?', '¢', '²', '¬', '?', '±', '¿', '?', '?', '¦', '?', '?', '¥', '—', '‹', '?', '?', '¼', '’', '¨', 'é', '¯', 'è', '¸', 'Ã', '?', '‘', '?', 
-     '?', '?', '?']
+    def get_labels_vocab(self):
+        return list(zip(self.start_positions, self.end_positions))
 
-    def clean_text(x):
-        x = str(x)
-        for punct in puncts:
-            if punct in x:
-                x = x.replace(punct, f' {punct} ')
-        return x
+    def __getitem__(self, idx):
+        if not self.isDatasetAvail:
+            item = {
+                "input_ids": self.encodings["input_ids"][idx],
+                "attention_mask": self.encodings["attention_mask"][idx],
+                "start_position": self.start_positions[idx],
+                "end_position": self.end_positions[idx]
+            }
+            return item
+        else:
+            return self.x[idx], self.y[idx]
 
+    def __len__(self):
+        if not self.isDatasetAvail:
+            return len(self.questions)
+        else:
+            return len(self.x)
 
-    def clean_numbers(x):
-        if bool(re.search(r'\d', x)):
-            x = re.sub('[0-9]{5,}', '#####', x)
-            x = re.sub('[0-9]{4}', '####', x)
-            x = re.sub('[0-9]{3}', '###', x)
-            x = re.sub('[0-9]{2}', '##', x)
-        return x
-
-    contraction_dict = {"ain't": "is not", "aren't": "are not","can't": "cannot", "'cause": "because", "could've": "could have", "couldn't": "could not", "didn't": "did not",  "doesn't": "does not", "don't": "do not", "hadn't": "had not", "hasn't": "has not", "haven't": "have not", "he'd": "he would","he'll": "he will", "he's": "he is", "how'd": "how did", "how'd'y": "how do you", "how'll": "how will", "how's": "how is",  "I'd": "I would", "I'd've": "I would have", "I'll": "I will", "I'll've": "I will have","I'm": "I am", "I've": "I have", "i'd": "i would", "i'd've": "i would have", "i'll": "i will",  "i'll've": "i will have","i'm": "i am", "i've": "i have", "isn't": "is not", "it'd": "it would", "it'd've": "it would have", "it'll": "it will", "it'll've": "it will have","it's": "it is", "let's": "let us", "ma'am": "madam", "mayn't": "may not", "might've": "might have","mightn't": "might not","mightn't've": "might not have", "must've": "must have", "mustn't": "must not", "mustn't've": "must not have", "needn't": "need not", "needn't've": "need not have","o'clock": "of the clock", "oughtn't": "ought not", "oughtn't've": "ought not have", "shan't": "shall not", "sha'n't": "shall not", "shan't've": "shall not have", "she'd": "she would", "she'd've": "she would have", "she'll": "she will", "she'll've": "she will have", "she's": "she is", "should've": "should have", "shouldn't": "should not", "shouldn't've": "should not have", "so've": "so have","so's": "so as", "this's": "this is","that'd": "that would", "that'd've": "that would have", "that's": "that is", "there'd": "there would", "there'd've": "there would have", "there's": "there is", "here's": "here is","they'd": "they would", "they'd've": "they would have", "they'll": "they will", "they'll've": "they will have", "they're": "they are", "they've": "they have", "to've": "to have", "wasn't": "was not", "we'd": "we would", "we'd've": "we would have", "we'll": "we will", "we'll've": "we will have", "we're": "we are", "we've": "we have", "weren't": "were not", "what'll": "what will", "what'll've": "what will have", "what're": "what are",  "what's": "what is", "what've": "what have", "when's": "when is", "when've": "when have", "where'd": "where did", "where's": "where is", "where've": "where have", "who'll": "who will", "who'll've": "who will have", "who's": "who is", "who've": "who have", "why's": "why is", "why've": "why have", "will've": "will have", "won't": "will not", "won't've": "will not have", "would've": "would have", "wouldn't": "would not", "wouldn't've": "would not have", "y'all": "you all", "y'all'd": "you all would","y'all'd've": "you all would have","y'all're": "you all are","y'all've": "you all have","you'd": "you would", "you'd've": "you would have", "you'll": "you will", "you'll've": "you will have", "you're": "you are", "you've": "you have", 'colour': 'color', 'centre': 'center', 'favourite': 'favorite', 'travelling': 'traveling', 'counselling': 'counseling', 'theatre': 'theater', 'cancelled': 'canceled', 'labour': 'labor', 'organisation': 'organization', 'wwii': 'world war 2', 'citicise': 'criticize', 'youtu ': 'youtube ', 'Qoura': 'Quora', 'sallary': 'salary', 'Whta': 'What', 'narcisist': 'narcissist', 'howdo': 'how do', 'whatare': 'what are', 'howcan': 'how can', 'howmuch': 'how much', 'howmany': 'how many', 'whydo': 'why do', 'doI': 'do I', 'theBest': 'the best', 'howdoes': 'how does', 'mastrubation': 'masturbation', 'mastrubate': 'masturbate', "mastrubating": 'masturbating', 'pennis': 'penis', 'Etherium': 'Ethereum', 'narcissit': 'narcissist', 'bigdata': 'big data', '2k17': '2017', '2k18': '2018', 'qouta': 'quota', 'exboyfriend': 'ex boyfriend', 'airhostess': 'air hostess', "whst": 'what', 'watsapp': 'whatsapp', 'demonitisation': 'demonetization', 'demonitization': 'demonetization', 'demonetisation': 'demonetization'}
-
-    def _get_contraction(contraction_dict):
-        contraction_re = re.compile('(%s)' % '|'.join(contraction_dict.keys()))
-        return contraction_dict, contraction_re
-
-    contractions, contraction_re = _get_contraction(contraction_dict)
-    def replace_typical_contraction(text):
-        def replace(match):
-            return contractions[match.group(0)]
-        return contract_re.sub(replace, text)
-    '''
-
-class BiLSTM(nn.Module):
+class biLSTM(nn.Module):
     def __init__(self):
-        super(BiLSTM, self).__init__()
+        super(biLSTM, self).__init__()
         self.hidden_size = hidden_size
-        drp = dropout
-        self.embedding = nn.Embedding(max_features, embed_size)
-        self.embedding.weight = nn.Parameter(torch.tensor(embedding_matrix, dtype=torch.float32))
-        self.embedding.weight.requires_grad = False
+        self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
         self.lstm = nn.LSTM(embed_size, self.hidden_size, bidirectional=True, batch_first=True)
         self.linear = nn.Linear(self.hidden_size * 4 , self.hidden_size)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(drp)
+        self.dropout = nn.Dropout(dropout)
         self.out = nn.Linear(64, 1)
+        self.start_classifier = nn.Linear(hidden_size * 2, 1)
+        self.end_classifier = nn.Linear(hidden_size * 2, 1)
 
     def forward(self, x):
-        h_embedding = self.embedding(x)
-        h_embedding = torch.squeeze(torch.unsqueeze(h_embedding, 0))
+        bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
         
-        h_lstm, _ = self.lstm(h_embedding)
-        avg_pool = torch.mean(h_lstm, 1)
-        max_pool, _ = torch.max(h_lstm, 1)
-        #print("avg_pool", avg_pool.size())
-        #print("max_pool", max_pool.size())
-        conc = torch.cat((avg_pool, max_pool), 1)
-        conc = self.relu(self.linear(conc))
-        conc = self.dropout(conc)
-        out = self.out(conc)
-        return out
+        h_lstm, _ = self.lstm(bert_outputs['last_hidden_state'])
+        start_logits = self.start_classifier(lstm_out).squeeze(-1)
+        end_logits = self.end_classifier(lstm_out).squeeze(-1)
 
-def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, device='cpu'):
+        start_logits = self.relu(self.linear(start_logits))
+        start_logits = self.out(self.dropout(start_logits))
+
+        end_logits = self.relu(self.linear(end_logits))
+        end_logits = self.out(self.dropout(end_logits))
+        return start_logits.squeeze(-1), end_logits.squeeze(-1)
+
+# Pad to the right side
+def collate_fn(batch):
+    input_ids = [item["input_ids"] for item in batch]
+    attention_masks = [item["attention_mask"] for item in batch]
+    start_positions = [item["start_position"] for item in batch]
+    end_positions = [item["end_position"] for item in batch]
+
+    input_ids = pad_sequence(input_ids, batch_first=True)
+    attention_masks = pad_sequence(attention_masks, batch_first=True)
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_masks,
+        "start_positions": torch.tensor(start_positions),
+        "end_positions": torch.tensor(end_positions)
+    }
+
+def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, device='cpu', model_path):
+    print('Starting training')
     seed_all()
 
-    dataloader = DataLoader(dataset, batch_size=batch_size)
+    x_train = dataset.get_texts_and_questions()
+    y_train = torch.tensor(dataset.get_labels_vocab())
+
+    print(len(x_train), len(y_train))
+    assert(len(x_train) == len(y_train))
+
+    #dataloader = DataLoader(dataset, batch_size=batch_size)
 
     # Combines a Sigmoid layer and the BCELoss in one single class
     criterion = nn.BCEWithLogitsLoss(reduction='sum')
 
-    optimiser = optim.Adam(model.parameters, lr=learning_rate)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
-    '''
     # Perform Stratified K-Folds cross-validations.
-    splits = list(StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=SEED).split(x_train, y_train))
+    kfold = RepeatedKFold(n_splits=num_splits, random_state=seed)
 
-    for i, (train_index, valid_index) in enumerate(splits):
+    for i, (train_index, valid_index) in enumerate(kfold.split(x_train, y_train)):
         seed_all(i * 100 + i)
 
-        x_train = np.array(x_train)
-        y_train = np.array(y_train)
+        x_train_fold = x_train[train_index.astype(int)].to(torch.long)
+        y_train_fold = y_train[train_index.astype(int), np.newaxis].to(torch.float32)
 
-        if feats:
-            features = np.array(features)
-        x_train_fold = torch.tensor(x_train[train_index.astype(int)], dtype=torch.long).cuda()
-        y_train_fold = torch.tensor(y_train[train_index.astype(int), np.newaxis], dtype=torch.float32).cuda()
+        x_val_fold = x_train[valid_index.astype(int)].to(torch.long)
+        y_val_fold = y_train[valid_index.astype(int), np.newaxis].to(torch.float32)
 
-        if feats:
-            kfold_X_features = features[train_index.astype(int)]
-            kfold_X_valid_features = features[valid_idx.astype(int)]
-        x_val_fold = torch.tensor(x_train[valid_idx.astype(int)], dtype=torch.long).cuda()
-        y_val_fold = torch.tensor(y_train[valid_idx.astype(int), np.newaxis], dtype=torch.float32).cuda()
+        train_set = biLSTMDataset(x=x_train_fold, y=y_train_fold)
+        valid_set = biLSTMDataset(x=x_val_fold, y=y_val_fold)
+
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+        valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
         
-        model = copy.deepcopy(model_obj)
-
-        model.cuda()
-
-        train_set = Dataset(torch.utils.data.TensorDataset(x_train_fold, y_train_fold))
-        valid_set = Dataset(torch.utils.data.TensorDataset(x_val_fold, y_val_fold))
-
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=True)
-
         print(f'Fold {i + 1}')
-    '''
-    start_time = datetime.datetime.now()
 
-    for epoch in range(num_epoch):
-        model.train()
-        avg_loss = 0.0
-        for step, data in enumerate(dataloader, 0):
-            texts, labels = data[0].to(device), data[1].to(device)
+        start_time = datetime.datetime.now()
 
-            optimiser.zero_grad()
+        for epoch in range(num_epochs):
+            model.train()
+            avg_loss = 0.0
+            for step, data in enumerate(train_loader, 0):
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+            
+                start_positions = batch["start_positions"].to(device)
+                end_positions = batch["end_positions"].to(device)
 
-            outputs = model(texts)
+                optimizer.zero_grad()
 
-            loss = criterion(outputs)
+                start_logits, end_logits = model(input_ids, attention_mask)
 
-            loss.backward()
+                start_loss = criterion(start_logits, start_positions)
+                end_loss = criterion(end_logits, end_positions)
+                loss = (start_loss + end_loss) / 2
 
-            optimiser.step()
+                loss.backward()
 
-            avg_loss = loss.item() / len(dataloader)
+                optimizer.step()
+
+                avg_loss = loss.item() / len(dataloader)
+
+                '''
+                if step % 100 == 99:
+                    print('[%d, %5d] loss: %.3f' %
+                        (epoch + 1, step + 1, loss / 100))
+                '''
+
+            model.eval()
+
+            valid_preds_fold = np.zeros((x_val_fold.size(0)))
+            test_preds_fold = np.zeros((dataset.__len__()))
+
+            avg_val_loss = 0
+
+            for step, data in enumerate(valid_loader, 0):
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+            
+                start_positions = batch["start_positions"].to(device)
+                end_positions = batch["end_positions"].to(device)
+
+                optimizer.zero_grad()
+
+                start_logits, end_logits = model(input_ids, attention_mask)
+
+                start_loss = criterion(start_logits, start_positions)
+                end_loss = criterion(end_logits, end_positions)
+                loss = (start_loss + end_loss) / 2
+
+                avg_loss = loss.item() / len(dataloader)
+                valid_preds_fold[index] = sigmoid(y_pred.cpu().numpy())[:, 0]
 
             if step % 100 == 99:
-                print('[%d, %5d] loss: %.3f' %
-                    (epoch + 1, step + 1, loss / 100))
+                print('Epoch[%d, %5d] average loss: %.3f average validation loss: %.3f' %
+                    (epoch + 1, step + 1, loss / 100, avg_val_loss / 100))
 
-        model.eval()
+        avg_losses_f.append(avg_loss)
+        avg_val_losses_f.append(avg_val_loss)
 
     end_time = datetime.datetime.now()
 
@@ -266,22 +332,43 @@ def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, devic
     print('Training finished in {} minutes.'.format(total_time))
 
     checkpoint = {
-        'model_state_dict': best_trained_model.state_dict(),
-        'vocab': dataset.getVocab(),
-        'best_params': best_params,
-        'model': best_trained_model
+        'epoch': num_epochs,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
     }
+
+    torch.save(checkpoint, model_path)
+
+    print("Model saved in ", model_path)
 
 def test(model, dataset, device, batch_size):
     seed_all()
 
     test_dataLoader = DataLoader(dataset, batch_size=batch_size)
 
+def get_f1(p, t):
+    p_tokens = p.split() # predicted
+    t_tokens = t.split() # true
+    common_tokens = set(p_tokens) & set(t_tokens)
+    if not p_tokens or not t_tokens:
+        return 0
+    precision = len(common_tokens) / len(p_tokens)
+    recall = len(common_tokens) / len(t_tokens)
+    if precision + recall == 0:
+        return 0
+    f1 = 2 * (precision * recall) / (precision + recall)
+    return f1
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_path', help='path to the text file')
+    parser.add_argument('--train_path', required=True, help='path to the training files')
+    parser.add_argument('--test_path', required=True, help='path to the test files')
+    parser.add_argument('--model_path', help='path to save trained model')
+    parser.add_argument('--output_path', help='path to model_prediction')
     return parser.parse_args()
+
 
 def main(args):
     if torch.cuda.is_available():
@@ -292,20 +379,26 @@ def main(args):
 
     args = get_arguments()
 
-    input_path = args.input_path
+    input_path = args.train_path
 
     seed_all()
 
     start_time = time.time()
 
-    dataset = biLSTMDataset(input_path, True)
+    dataset = biLSTMDataset(input_path=input_path)
 
-    print("Time for initialisation: ", time.time() - start)
+    print("Time for initialisation: ", time.time() - start_time)
 
-    model = BiLSTM()
+    model = biLSTM().to(device)
 
-    split_and_train(model, dataset, batch_size, learning_rate, num_epochs, device)
+    split_and_train(model, dataset, batch_size, learning_rate, num_epochs, device, model_path=model_path)
 
-    test_dataset = biLSTMDataset("data/curated/test_data")
+    # test the model (to be modified from trg data to test data)
+    checkpoint = torch.load(model_path)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    squad_test = SquadDataset(test_path)
+    test_output = test(model, dataset=squad_test, device=device)
 
-    test_outputs = test(model, dataset, device, batch_size)
+if __name__ == "__main__":
+    args = get_arguments()
+    main(args)
