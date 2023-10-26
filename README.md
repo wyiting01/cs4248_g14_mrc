@@ -2,6 +2,8 @@ CS4248 G14 Machine Reading Comprehension on SQuAD
 
 Base Models
 1) BERT
+   - File bert.py
+   - Model: BERT-SQuAD
 
 2) XLNet
    - File: xlnet.py
