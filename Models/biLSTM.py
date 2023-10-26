@@ -27,19 +27,18 @@ pip install contractions
 pip install -U scikit-learn
 pip install transformers
 
-To run, use command: python3 Models/biLSTM.py --input_path data/curated/training_data/
+To run, use command: python3 Models/biLSTM.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt
 '''
 
 # Pytorch version: Adapted from https://www.kaggle.com/code/mlwhiz/bilstm-pytorch-and-keras
 
 # Randomly initialised hyperparameters. To be put into a grid search.
-embed_size = 360
-max_features = 100000
+embed_size = 64
 maxQnLen = 80
 batch_size = 64
-num_epochs = 10
+num_epochs = 1
 num_splits = 2
-hidden_size = 128
+hidden_size = 64
 seed = 0
 dropout = 0.1
 learning_rate = 0.001
@@ -70,10 +69,10 @@ class biLSTMDataset(Dataset):
 
             print('Initialising dataset')
 
-            self.contexts = self.extractAndCleanData(context)[:100]
-            self.questions = self.extractAndCleanData(questions)[:100]
-            self.answers = self.extractAndCleanData(answers)[:100]
-            self.answer_spans = self.extractAndCleanData(answer_spans)[:100]
+            self.contexts = self.extractAndCleanData(context)
+            self.questions = self.extractAndCleanData(questions)
+            self.answers = self.extractAndCleanData(answers)
+            self.answer_spans = self.extractAndCleanData(answer_spans)
 
             self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
@@ -99,6 +98,11 @@ class biLSTMDataset(Dataset):
             self.isDatasetAvail = True
             self.x = x
             self.y = y
+
+            self.longest_len = 0
+            for i in self.x:
+                if len(i) > self.longest_len:
+                    self.longest_len = len(i)
 
     def char_to_token_position(self, idx, char_position):
         # return len(self.tokenizer.encode(self.contexts[idx][:char_position]))
@@ -127,20 +131,22 @@ class biLSTMDataset(Dataset):
 
         # Clean non-ASCII dashes.
         text = self.clean_dashes(text)
+        # Clean non-ASCII apostrophes and quotation marks.
         text = self.clean_contractions(text)
+        # This expands any contractions: (e.g. I'd --> I had)
         text = contractions.fix(text)
 
         text = self.correct_spelling(text, american_to_british_dict)
 
         return text
 
+    # Remove non-ASCII dashes.
     def clean_dashes(self, text):
         text = text.replace(u'\u2013', '-')
         return text
 
     # Remove non-ASCII quotes.
     def clean_contractions(self, text):
-        # For non-ASCII quotation marks.
         specials = [u'\u2018', u'\u2019', u'\u00B4', u'\u0060']
         for s in specials:
             text = text.replace(s, "'")
@@ -170,9 +176,14 @@ class biLSTMDataset(Dataset):
                 "start_position": self.start_positions[idx],
                 "end_position": self.end_positions[idx]
             }
-            return item
         else:
-            return self.x[idx], self.y[idx]
+            item = {
+                "input_ids": self.x[idx],
+                "attention_mask": torch.tensor([1] * len(self.x[idx]) + [0] * (self.longest_len - len(self.x[idx]))),
+                "start_position": self.y[idx][0][0],
+                "end_position": self.y[idx][0][1]
+            }
+        return item
 
     def __len__(self):
         if not self.isDatasetAvail:
@@ -181,31 +192,23 @@ class biLSTMDataset(Dataset):
             return len(self.x)
 
 class biLSTM(nn.Module):
-    def __init__(self):
-        super(biLSTM, self).__init__()
-        self.hidden_size = hidden_size
+    def __init__(self, input_size, hidden_dim, num_layers, num_labels):
+        super(BERT_BiLSTM, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
         self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
-        self.lstm = nn.LSTM(embed_size, self.hidden_size, bidirectional=True, batch_first=True)
-        self.linear = nn.Linear(self.hidden_size * 4 , self.hidden_size)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
-        self.out = nn.Linear(64, 1)
-        self.start_classifier = nn.Linear(hidden_size * 2, 1)
-        self.end_classifier = nn.Linear(hidden_size * 2, 1)
+        self.bilstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
+        # self.classifier = nn.Linear(hidden_dim*2, num_labels)  # multiply for bidirectional
+        self.start_classifier = nn.Linear(hidden_dim*2, 1) 
+        self.end_classifier = nn.Linear(hidden_dim*2, 1)
 
-    def forward(self, x):
+    def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
-        
-        h_lstm, _ = self.lstm(bert_outputs['last_hidden_state'])
+        lstm_out, _ = self.bilstm(bert_outputs['last_hidden_state'])
+        # logits = self.classifier(lstm_out)
         start_logits = self.start_classifier(lstm_out).squeeze(-1)
         end_logits = self.end_classifier(lstm_out).squeeze(-1)
-
-        start_logits = self.relu(self.linear(start_logits))
-        start_logits = self.out(self.dropout(start_logits))
-
-        end_logits = self.relu(self.linear(end_logits))
-        end_logits = self.out(self.dropout(end_logits))
-        return start_logits.squeeze(-1), end_logits.squeeze(-1)
+        return start_logits.squeeze(-1), end_logits.squeeze(-1)  # Returns two tensors of shape [batch_size, seq_length]
 
 # Pad to the right side
 def collate_fn(batch):
@@ -224,7 +227,7 @@ def collate_fn(batch):
         "end_positions": torch.tensor(end_positions)
     }
 
-def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, device='cpu', model_path):
+def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, device, model_path):
     print('Starting training')
     seed_all()
 
@@ -266,7 +269,7 @@ def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, devic
         for epoch in range(num_epochs):
             model.train()
             avg_loss = 0.0
-            for step, data in enumerate(train_loader, 0):
+            for step, batch in enumerate(train_loader, 0):
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
             
@@ -287,11 +290,9 @@ def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, devic
 
                 avg_loss = loss.item() / len(dataloader)
 
-                '''
                 if step % 100 == 99:
                     print('[%d, %5d] loss: %.3f' %
                         (epoch + 1, step + 1, loss / 100))
-                '''
 
             model.eval()
 
@@ -300,7 +301,7 @@ def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, devic
 
             avg_val_loss = 0
 
-            for step, data in enumerate(valid_loader, 0):
+            for batch in valid_loader:
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
             
@@ -315,7 +316,7 @@ def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, devic
                 end_loss = criterion(end_logits, end_positions)
                 loss = (start_loss + end_loss) / 2
 
-                avg_loss = loss.item() / len(dataloader)
+                avg_loss = loss.item() / len(valid_loader)
                 valid_preds_fold[index] = sigmoid(y_pred.cpu().numpy())[:, 0]
 
             if step % 100 == 99:
@@ -324,6 +325,9 @@ def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, devic
 
         avg_losses_f.append(avg_loss)
         avg_val_losses_f.append(avg_val_loss)
+
+        test_outputs = test(model, dataset=test_dataset, device=device)
+        print(test_outputs)
 
     end_time = datetime.datetime.now()
 
@@ -343,10 +347,50 @@ def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, devic
 
     print("Model saved in ", model_path)
 
-def test(model, dataset, device, batch_size):
-    seed_all()
+def test(model, dataset, device='cpu'):
+    model.eval()
+    test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
+    
+    # total_start_pos = []
+    # total_end_pos = []
 
-    test_dataLoader = DataLoader(dataset, batch_size=batch_size)
+    total_f1 = 0
+    total_em = 0
+
+    with torch.no_grad():
+        for batch in test_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            
+            start_logits, end_logits = model(input_ids, attention_mask)
+
+            # Getting the most likely start and end positions
+            start_pos = torch.argmax(start_logits, dim=1)
+            end_pos = torch.argmax(end_logits, dim=1)
+            
+            # total_start_pos.extend(start_pos.cpu().numpy())
+            # total_end_pos.extend(end_pos.cpu().numpy())
+
+            for i in range(input_ids.size(0)):
+                pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
+                true_answer = dataset.answers[i]
+                print("-----TEST-----")
+                print(f"Sample {i+1}:")
+                print("Predicted Answer:", pred_answer)
+                print("True Answer:", true_answer)
+                print("-----")
+                if pred_answer == true_answer:
+                    total_em += 1
+                total_f1 += get_f1(pred_answer, true_answer)
+    print(total_em)
+    n = len(dataset)
+    avg_f1 = total_f1/n
+    avg_em = total_em/n
+
+    # return total_start_pos, total_end_pos
+    # TODO: check which metric to use, and if weighted average is a 
+    # return avg_f1, avg_em 
+    return -(0.5 * avg_f1 + 0.5 * avg_em)
 
 def get_f1(p, t):
     p_tokens = p.split() # predicted
@@ -364,7 +408,7 @@ def get_f1(p, t):
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_path', required=True, help='path to the training files')
-    parser.add_argument('--test_path', required=True, help='path to the test files')
+    parser.add_argument('--test_path', help='path to the test files')
     parser.add_argument('--model_path', help='path to save trained model')
     parser.add_argument('--output_path', help='path to model_prediction')
     return parser.parse_args()
@@ -381,11 +425,17 @@ def main(args):
 
     input_path = args.train_path
 
+    model_path = args.model_path
+
+    test_path = args.test_path
+
     seed_all()
 
     start_time = time.time()
 
     dataset = biLSTMDataset(input_path=input_path)
+
+    test_dataset = biLSTMDataset(input_path=test_path)
 
     print("Time for initialisation: ", time.time() - start_time)
 
