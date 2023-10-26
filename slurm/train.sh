@@ -1,2 +1,6 @@
+#!/bin/sh
+
 python xlnet.py \
-	--input_path "../data/curated/training_data"
+    --train\
+	--data_path "../data/curated/training_data"\
+	--model_path "./xlnet.pt"
