@@ -9,12 +9,16 @@ from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
 
+torch.manual_seed(0)
+
 class SquadDataset(Dataset):
 
     def __init__(self, input_path):
         """
-        input_path: path that contains all the files - context, question and answer span
+        input_path: path that contains all the files - contexts, questions, answers, answer spans and question ids
         """
+        print(f"Reading in Dataset from {input_path}")
+        
         with open(input_path + "/context", encoding='utf-8') as f:
             contexts = f.read().split("\t")
         with open(input_path + "/question", encoding='utf-8') as f:
@@ -26,17 +30,19 @@ class SquadDataset(Dataset):
         with open(input_path + "/question_id", encoding='utf-8') as f:
             qids = f.read().split("\t")
 
-        self.contexts = [ctx.strip() for ctx in contexts]#[:10]
-        self.questions = [qn.strip() for qn in questions]#[:10]
-        self.answers = [ans.strip() for ans in answers]#[:10]
-        self.spans = [span.strip().split() for span in spans]#[:10]
+        self.contexts = [ctx.strip() for ctx in contexts]
+        self.questions = [qn.strip() for qn in questions]
+        self.answers = [ans.strip() for ans in answers]
+        self.spans = [span.strip().split() for span in spans]
         self.start_indices = [int(x[0]) for x in self.spans]
         self.end_indices = [int(x[1]) for x in self.spans]
         self.qids = [qid.strip() for qid in qids]
 
+        # intialise XLNetTokenizerFast for input tokenization
         self.tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
         self.tokenizer.padding_side = "right"
 
+        # extract tokenization outputs
         self.tokenizer_dict = self.tokenize()
         self.sample_mapping, self.offset_mapping = self.preprocess()
 
@@ -46,6 +52,25 @@ class SquadDataset(Dataset):
 
 
     def tokenize(self, max_length=384, doc_stride=128):
+        """
+        inputs:
+        1. max_length: specifies the length of the tokenized text
+        2. doc_stride: defines the number of overlapping tokens
+
+        output:
+        1. tokenizer_dict, which contains
+        - input_ids: list of integer values representing the tokenized text; each integer corresponds to a specific token
+        - token_type_ids: to distinguish between question and context
+        - attention_mask: a binary mask that tells the model which tokens to mask/not mask
+        - sample_mapping: map from a feature to its corresponding example, since one question-context pair might give several features
+        - offset_mapping: maps each input id with the corresponding start and end characters in the original text
+
+        Tokenize examples (question-context pairs) with truncation and padding, but keep the overflows using a stride specified by `doc_stride`. 
+        When the question-context input exceeds the `max_length`, it will contain more than one feature, and each of these features will have context
+        that overlaps a bit with the previous features, and the overlapping is determined by `doc_stride`. This is to ensure that although truncation
+        is performed, these overflows will ensure that no answer is missed as long as the answer span is shorter than the length of the overlap.
+        """
+        print("Performing tokenization on dataset")
         tokenizer_dict = self.tokenizer(
             self.questions,
             self.contexts,
@@ -59,6 +84,13 @@ class SquadDataset(Dataset):
         return tokenizer_dict
 
     def preprocess(self):
+        """
+        This functions is to preprocess the outputs of the tokenizer dictionary.
+        Due to the possibility that an example has multiple features, this functions ensure that the start_positions and end_positions are mapped
+        correctly
+        """
+        print("Preprocessing Dataset")
+
         sample_mapping = self.tokenizer_dict.pop("overflow_to_sample_mapping")
         offset_mapping = self.tokenizer_dict.pop("offset_mapping")
 
@@ -100,7 +132,7 @@ class SquadDataset(Dataset):
 
     def __len__(self):
         """
-        Return the number of instances in the data
+        Return the number of features in the data
         """
         return len(self.sample_mapping)
 
@@ -127,13 +159,17 @@ class SquadDataset(Dataset):
     
 def train(model, dataset, batch_size=16, learning_rate=5e-5, num_epoch=10, device='cpu', model_path=None):
 
-    data_loader = DataLoader(dataset, batch_size=batch_size)#, shuffle=True)
+    print("Training XLNet Model")
+
+    data_loader = DataLoader(dataset, batch_size=batch_size)
     optimizer = AdamW(model.parameters(), lr=learning_rate)
 
     start = datetime.datetime.now()
     for epoch in range(num_epoch):
         model.train()
+
         for step, batch in enumerate(data_loader, 0):
+            
             # get the inputs; batch is a dict
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
@@ -162,6 +198,7 @@ def train(model, dataset, batch_size=16, learning_rate=5e-5, num_epoch=10, devic
 
     end = datetime.datetime.now()
 
+    # save trained model
     checkpoint = {
         'epoch': num_epoch,
         'lr': learning_rate,
@@ -181,12 +218,14 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
     pred = {}
 
+    print("Making Predictions on Test Dataset")
     with torch.no_grad():
         for data in test_dataloader:
             input_ids = data["input_ids"].to(device)
             attention_mask = data["attention_mask"].to(device)
             start = data["start_positions"].to(device)
             end = data["end_positions"].to(device)
+            
             output = model(input_ids=input_ids, attention_mask=attention_mask)
 
             offset_mapping = data["offset_mapping"]
@@ -196,7 +235,6 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
             qids = data["og_question_ids"]
 
             for i in range(len(input_ids)):
-
                 start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
                 end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
                 start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
@@ -204,7 +242,6 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
                 start_top_indexes = output.start_top_index[i]
                 end_top_indexes = output.end_top_index[i]
-
 
                 offsets = offset_mapping[i]
                 ctxt = context[i]
@@ -215,8 +252,8 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                     for end in end_indexes:
                         start_index = start_top_indexes[start]
                         end_index = end_top_indexes[end]
-                        # Don't consider out-of-scope answers, either because the indices are out of bounds or correspond
-                        # to part of the input_ids that are not in the context.
+                        # exclude out-of-scope answers, either because the indices are out of bounds or correspond
+                        # to part of the input_ids that are not in the context
                         if (
                             start_index >= len(offsets)
                             or end_index >= len(offsets)
@@ -224,10 +261,11 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                             or offsets[end_index] is None
                         ):
                             continue
-                        # Don't consider answers with a length that is either < 0 or > max_answer_length.
+                        # exclude answers with lengths < 0 or > max_answer_length
                         if end_index < start_index or end_index - start_index + 1 > max_answer_length:
                             continue
-                        if start_index <= end_index: # We need to refine that test to check the answer is inside the context
+                        # for valid answers, we will calculate the score and extract the answers out
+                        if start_index <= end_index:
                             start_char = offsets[start_index][0]
                             end_char = offsets[end_index][1]
                             valid_answers.append(
@@ -246,32 +284,53 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     return pred
 
 def main(args):
-    train_path, test_path, model_path, output_path = args.train_path, args.test_path, args.model_path, args.output_path
+    
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    squad_train = SquadDataset(train_path)
+    print("Initialising XLNet Model")
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
 
-    # train the model
-    train(model=model, dataset=squad_train, num_epoch=2, batch_size=16, device=device, model_path = model_path)
+    if args.train:
+        train_path, model_path = args.data_path, args.model_path
+        squad_train = SquadDataset(train_path)
 
-    # test the model (to be modified from trg data to test data)
-    checkpoint = torch.load(model_path)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    squad_test = SquadDataset(test_path)
-    test_output = test(model, dataset=squad_test, device=device)
+        # specify hyperparameters
+        num_epoch = 2
+        batch_size = 16
+        learning_rate = 5e-5
 
-    with open(output_path, 'w') as f:
-        json.dump(test_output, f)
+        # train the model
+        train(model=model, dataset=squad_train, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=model_path)
+    
+    if args.test:
+        test_path, model_path, output_path = args.data_path, args.model_path, args.output_path
+        print("Loading Saved Weights from Training")
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        squad_test = SquadDataset(test_path)
+
+        # specify hyperparameters
+        n_best_size = 20
+        max_answer_length = 30
+
+        # use trained model to make predictions
+        test_output = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
+    
+        # write model prediction into json file
+        with open(output_path, 'w') as f:
+            json.dump(test_output, f)
+
+        print('Model predictions saved in ', output_path)
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_path', help='path to the text file')
-    parser.add_argument('--test_path', help='path to the text file')
+    parser.add_argument('--train', default=False, action='store_true', help='train the model')
+    parser.add_argument('--test', default=False, action='store_true', help='test the model')
+    parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--model_path', help='path to save trained model')
-    parser.add_argument('--output_path', help='path to model_prediction')
+    parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = get_arguments()
     main(args)
+    print("Completed!")
