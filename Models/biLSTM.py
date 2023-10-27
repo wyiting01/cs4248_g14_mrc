@@ -1,13 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import argparse
-import contractions
-import copy
 import datetime
 import numpy as np
 import os
 import random
-import requests
 import sys
 import time
 import torch
@@ -20,10 +17,9 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import BertTokenizerFast, BertModel
 
 '''
-Need to install libraries for numpy, contractions, sklearn, transformers:
+Need to install libraries for numpy, sklearn, transformers:
 
 pip install numpy
-pip install contractions
 pip install -U scikit-learn
 pip install transformers
 
@@ -32,7 +28,7 @@ To run, use command: python3 Models/biLSTM.py --train_path data/curated/training
 
 # Pytorch version: Adapted from https://www.kaggle.com/code/mlwhiz/bilstm-pytorch-and-keras
 
-# Randomly initialised hyperparameters. To be put into a grid search.
+# Randomly initialised hyperparameters. TODO: Put into a grid search.
 embed_size = 64
 maxQnLen = 80
 batch_size = 64
@@ -43,12 +39,6 @@ seed = 0
 dropout = 0.1
 learning_rate = 0.001
 
-#puncts = ['~', '`', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '-', '+', '=', '[', ']', '{', '}', '\\', "\|", ':', ';', '\'', '\"', '<', ',', '>', '.', '?', '/']
-
-# Adapted from: https://stackoverflow.com/questions/42329766/python-nlp-british-english-vs-american-english
-url ="https://raw.githubusercontent.com/hyperreality/American-British-English-Translator/master/data/american_spellings.json"
-american_to_british_dict = requests.get(url).json()
-
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
     random.seed(seed)
@@ -56,23 +46,25 @@ def seed_all(seed=0):
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
 
+def read_content(file_path):
+    with open(file_path, encoding='utf-8') as f:
+        return f.read().split("\t")
+
 class biLSTMDataset(Dataset):
-    def __init__(self, x=None, y=None, input_path="", isTraining=False):
-        if input_path != "":
+    def __init__(self, x=None, y=None, in_path="", isTraining=False):
+        if in_path != "":
             self.isDatasetAvail = False
 
             # Initialise training set.
-            context = input_path + "/context"
-            questions = input_path + "/question"
-            answers = input_path + "/answer"
-            answer_spans = input_path + "/answer_span"
+            contexts = read_content(f"{in_path}/context")
+            questions = read_content(f"{in_path}/question")
+            answers = read_content(f"{in_path}/answer")
+            spans = read_content(f"{in_path}/answer_span")
 
-            print('Initialising dataset')
-
-            self.contexts = self.extractAndCleanData(context)
-            self.questions = self.extractAndCleanData(questions)
-            self.answers = self.extractAndCleanData(answers)
-            self.answer_spans = self.extractAndCleanData(answer_spans)
+            self.contexts = [ctx.strip() for ctx in contexts]
+            self.questions = [qn.strip() for qn in questions]
+            self.answers = [ans.strip() for ans in answers]
+            self.spans = [span.strip().split() for span in spans]
 
             self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
@@ -94,6 +86,7 @@ class biLSTMDataset(Dataset):
                 end_position = self.char_to_token_position(i, answer_end_idx)
                 self.start_positions.append(start_position)
                 self.end_positions.append(end_position)
+
         else:
             self.isDatasetAvail = True
             self.x = x
@@ -117,50 +110,11 @@ class biLSTMDataset(Dataset):
         # Cannot return None if using k-fold validations.
         return len(offsets)
 
-    def extractAndCleanData(self, file_path):
+    def extractData(self, file_path):
         with open(file_path, "r", encoding='utf-8') as file:
             data = file.read().split('\t')
-        print('Cleaning dataset')
-        newDataset = [self.clean_text(line.strip()) for line in data]
+        newDataset = [line.strip() for line in data]
         return newDataset
-
-    # Clean up input text to be more standardised (spelling & word form) and decrease dictionary size.
-    # Note: Due to nature of questions & answers, cannot remove all special characters as they are present in them.
-    def clean_text(self, text):
-        text = text.lower()
-
-        # Clean non-ASCII dashes.
-        text = self.clean_dashes(text)
-        # Clean non-ASCII apostrophes and quotation marks.
-        text = self.clean_contractions(text)
-        # This expands any contractions: (e.g. I'd --> I had)
-        text = contractions.fix(text)
-
-        text = self.correct_spelling(text, american_to_british_dict)
-
-        return text
-
-    # Remove non-ASCII dashes.
-    def clean_dashes(self, text):
-        text = text.replace(u'\u2013', '-')
-        return text
-
-    # Remove non-ASCII quotes.
-    def clean_contractions(self, text):
-        specials = [u'\u2018', u'\u2019', u'\u00B4', u'\u0060']
-        for s in specials:
-            text = text.replace(s, "'")
-        return text
-
-    def correct_spelling(self, text, dic):
-        words = text.split()
-        for i in range(len(words)):
-            if words[i] not in dic.keys():
-                continue
-            else:
-                words[i] = american_to_british_dict[words[i]]
-        text = ' '.join(words)
-        return text
 
     def get_texts_and_questions(self):
         return self.encodings["input_ids"]
@@ -433,7 +387,7 @@ def main(args):
 
     start_time = time.time()
 
-    dataset = biLSTMDataset(input_path=input_path)
+    dataset = biLSTMDataset(in_path=input_path)
 
     test_dataset = biLSTMDataset(input_path=test_path)
 
