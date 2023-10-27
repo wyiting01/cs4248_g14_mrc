@@ -34,47 +34,66 @@ class SquadDataset(Dataset):
         answers = read_content(f"{in_path}/answer")
         spans = read_content(f"{in_path}/answer_span")
 
-        # TODO: Disbale this ltr
-        # self.contexts = [ctx.strip() for ctx in contexts][:10]
-        # self.questions = [qn.strip() for qn in questions][:10]
-        # self.answers = [ans.strip() for ans in answers][:10]
-        # self.spans = [span.strip().split() for span in spans][:10]
-
         self.contexts = [ctx.strip() for ctx in contexts]
         self.questions = [qn.strip() for qn in questions]
         self.answers = [ans.strip() for ans in answers]
         self.spans = [span.strip().split() for span in spans]
 
-        self.encodings = self.tokenizer(self.contexts,
-                                        self.questions,
-                                        max_length=512,
-                                        truncation="only_second",
-                                        padding=True,
+        self.encodings = self.tokenizer(self.questions,
+                                        self.contexts,
+                                        truncation=True,
+                                        padding="max_length",
+                                        ## TODO: optimise hyperparam ltr
+                                        max_length=384,
+                                        stride=128,
                                         return_tensors="pt",
                                         add_special_tokens=True,
+                                        return_overflowing_tokens=True,
                                         return_offsets_mapping=True
                                         )
 
         self.start_positions = []
         self.end_positions = []
+
         for i, (context, answer) in enumerate(zip(self.contexts, self.answers)):
-            answer_start_idx = context.find(answer)
-            answer_end_idx = answer_start_idx + len(answer) - 1
-            start_position = self.char_to_token_position(i, answer_start_idx)
-            end_position = self.char_to_token_position(i, answer_end_idx)
-            self.start_positions.append(start_position)
-            self.end_positions.append(end_position)
+            offsets = self.encodings['offset_mapping'][i]
+            start_char_pos, end_char_pos = int(self.spans[i][0]), int(self.spans[i][1])
 
-    # convert char pos in the og text to token pos in the tokenized ver
-    def char_to_token_position(self, i, char_position):
-        offsets = self.encodings['offset_mapping'][i]
+            # adjust for question-context pairs
+            question_tokens = self.tokenizer.tokenize(self.questions[i])
+            context_start_token_pos = len(question_tokens) + 2  # +1 for the [CLS] token
 
-        for token_pos, (start, end) in enumerate(offsets):
-            if char_position >= start and char_position < end:
-                # TODO: Check: can answer be in question? if so, need to account for [SEP] 
-                return token_pos + 1 # +1 because of bert [CLS] token
+            if i == 24:
+                print("Context:", self.contexts[i])
+                print("Answer:", self.answers[i])
+                print("Tokenized Answer:", self.tokenizer.tokenize(self.answers[i]))
+                print("Span start:", start_char_pos, "Span end:", end_char_pos)
+                print("Context tokens:", self.tokenizer.tokenize(self.contexts[i][start_char_pos:end_char_pos]))
             
-        raise ValueError(f"Token position for char position {char_position} not found in context {i}.")
+            for j, (offset_start, offset_end) in enumerate(offsets[context_start_token_pos:]):
+            
+                token_start = token_end = None
+
+                for j, (offset_start, offset_end) in enumerate(offsets[context_start_token_pos:]):  # Only look within the context offsets
+                    # Check if the token starts or ends within the given answer span
+                    
+                    if offset_start == start_char_pos or (token_start is None and offset_start > start_char_pos):
+                        token_start = j + context_start_token_pos
+                    if offset_end == end_char_pos:
+                        token_end = j + context_start_token_pos
+                        break  # We can break early once we find the end token
+                    
+                    current_span = context[offset_start:offset_end]
+                    if current_span == answer:
+                        token_start = j + context_start_token_pos
+                        token_end = token_start + len(self.tokenizer.tokenize(answer)) - 1  # Adjust for multi-token answers
+                        break
+                        
+                if token_start is None or token_end is None:
+                    raise ValueError(f"Token span for answer '{answer}' not found in context {i}.")
+            
+                self.start_positions.append(token_start)
+                self.end_positions.append(token_end)
 
     def __len__(self):
         return len(self.contexts)
@@ -236,7 +255,9 @@ space = {
     'learning_rate': hp.loguniform('learning_rate', np.log(1e-6), np.log(1e-2)),
     'batch_size': hp.choice('batch_size', [1, 8, 16, 32, 64]),
     # 'num_layers': hp.quniform('num_layers', 1, 5, 1),
-    # 'hidden_dim': hp.quniform('hidden_dim', 64, 512, 64)
+    # 'hidden_dim': hp.quniform('hidden_dim', 64, 512, 64),
+    # 'max_length': hp.choice('max_length', list(range(256, 513, 64))),
+    # 'stride': hp.choice('stride', list(range(64, 257, 64)))
 }
 
 def objective(params):
