@@ -35,12 +35,25 @@ class SquadDataset(Dataset):
         spans = read_content(f"{in_path}/answer_span")
 
         # TODO: Disbale this ltr
-        self.contexts = [ctx.strip() for ctx in contexts][:5]
-        self.questions = [qn.strip() for qn in questions][:5]
-        self.answers = [ans.strip() for ans in answers][:5]
-        self.spans = [span.strip().split() for span in spans][:5]
+        # self.contexts = [ctx.strip() for ctx in contexts][:10]
+        # self.questions = [qn.strip() for qn in questions][:10]
+        # self.answers = [ans.strip() for ans in answers][:10]
+        # self.spans = [span.strip().split() for span in spans][:10]
 
-        self.encodings = self.tokenizer(self.contexts, self.questions, truncation=True, padding=True, return_tensors="pt")
+        self.contexts = [ctx.strip() for ctx in contexts]
+        self.questions = [qn.strip() for qn in questions]
+        self.answers = [ans.strip() for ans in answers]
+        self.spans = [span.strip().split() for span in spans]
+
+        self.encodings = self.tokenizer(self.contexts,
+                                        self.questions,
+                                        max_length=512,
+                                        truncation="only_second",
+                                        padding=True,
+                                        return_tensors="pt",
+                                        add_special_tokens=True,
+                                        return_offsets_mapping=True
+                                        )
 
         self.start_positions = []
         self.end_positions = []
@@ -53,16 +66,15 @@ class SquadDataset(Dataset):
             self.end_positions.append(end_position)
 
     # convert char pos in the og text to token pos in the tokenized ver
-    def char_to_token_position(self, idx, char_position):
-        # return len(self.tokenizer.encode(self.contexts[idx][:char_position]))
-        tokens_info = self.tokenizer.encode_plus(self.contexts[idx], add_special_tokens=True, return_offsets_mapping=True)
-        offsets = tokens_info['offset_mapping']
-    
+    def char_to_token_position(self, i, char_position):
+        offsets = self.encodings['offset_mapping'][i]
+
         for token_pos, (start, end) in enumerate(offsets):
             if char_position >= start and char_position < end:
-                return token_pos
-        print("Error in span")
-        return None
+                # TODO: Check: can answer be in question? if so, need to account for [SEP] 
+                return token_pos + 1 # +1 because of bert [CLS] token
+            
+        raise ValueError(f"Token position for char position {char_position} not found in context {i}.")
 
     def __len__(self):
         return len(self.contexts)
@@ -206,7 +218,6 @@ def test(model, dataset, device='cpu'):
                 print(f"Sample {i+1}:")
                 print("Predicted Answer:", pred_answer)
                 print("True Answer:", true_answer)
-                print("-----")
                 if pred_answer == true_answer:
                     total_em += 1
                 total_f1 += get_f1(pred_answer, true_answer)
