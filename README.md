@@ -4,6 +4,7 @@ Base Models
 1) BERT
    - File bert.py
    - Model: BERT-SQuAD
+     {"exact": 57.79564806054872,"f1": 72.18288133527203}
 
 2) XLNet
    - File: xlnet.py
