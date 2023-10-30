@@ -19,6 +19,6 @@ q = 'When did Victoria enact its constitution?'
 
 answer = model.predict(doc,q)
 
-print(answer['start'])
-
-print(answer.keys())
+# print(answer['answer'])
+print(answer['answer'])
+# print(answer.keys())
