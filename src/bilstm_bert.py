@@ -128,7 +128,7 @@ class BERT_BiLSTM(nn.Module):
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
-        lstm_out, _ = self.bilstm(bert_outputs['last_hidden_state'])
+        lstm_out, _ = self.lstm(bert_outputs['last_hidden_state'])
         linear_out = self.linear(lstm_out)
         relu_out = self.relu(linear_out)
         dropout_out = self.dropout(relu_out)
