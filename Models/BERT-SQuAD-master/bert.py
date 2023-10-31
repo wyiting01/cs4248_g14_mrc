@@ -11,7 +11,7 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
 from torch.utils.data import DataLoader, SequentialSampler, TensorDataset
 
 from utils import (get_answer, input_to_squad_example,
-                   squad_examples_to_features, to_list)
+                   squad_examples_to_features, to_list, get_full_answer)
 
 RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
@@ -71,5 +71,5 @@ class QA:
                                     start_logits = to_list(outputs[0][i]),
                                     end_logits   = to_list(outputs[1][i]))
                 all_results.append(result)
-        answer = get_answer(example,features,all_results,self.n_best_size,self.max_answer_length,self.do_lower_case)
+        answer = get_full_answer(example,features,all_results,self.n_best_size,self.max_answer_length,self.do_lower_case)
         return answer
