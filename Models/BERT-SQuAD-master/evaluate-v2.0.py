@@ -231,7 +231,6 @@ def find_all_best_thresh(main_eval, preds, exact_raw, f1_raw, na_probs, qid_to_h
 def main():
   with open(OPTS.data_file) as f:
     dataset_json = json.load(f)
-    print(dataset_json)
     dataset = dataset_json['data']
   with open(OPTS.pred_file) as f:
     preds = json.load(f)
