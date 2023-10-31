@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
-from hyperopt import fmin, tpe, hp, STATUS_OK, Trials #for learning rate and batch size
+from hyperopt import fmin, tpe, hp, STATUS_OK, Trials 
 
 torch.manual_seed(0)
 
@@ -41,59 +41,62 @@ class SquadDataset(Dataset):
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
-                                        truncation=True,
                                         padding="max_length",
-                                        ## TODO: optimise hyperparam ltr
                                         max_length=384,
                                         stride=128,
                                         return_tensors="pt",
+                                        truncation="only_second",
                                         add_special_tokens=True,
                                         return_overflowing_tokens=True,
                                         return_offsets_mapping=True
                                         )
-
+        
         self.start_positions = []
         self.end_positions = []
+        self.sample_mapping = self.encodings.pop("overflow_to_sample_mapping")
+        self.offset_mapping = self.encodings.pop("offset_mapping")
 
-        for i, (context, answer) in enumerate(zip(self.contexts, self.answers)):
-            offsets = self.encodings['offset_mapping'][i]
-            start_char_pos, end_char_pos = int(self.spans[i][0]), int(self.spans[i][1])
-
-            # adjust for question-context pairs
-            question_tokens = self.tokenizer.tokenize(self.questions[i])
-            context_start_token_pos = len(question_tokens) + 2  # +1 for the [CLS] token
-
-            if i == 24:
-                print("Context:", self.contexts[i])
-                print("Answer:", self.answers[i])
-                print("Tokenized Answer:", self.tokenizer.tokenize(self.answers[i]))
-                print("Span start:", start_char_pos, "Span end:", end_char_pos)
-                print("Context tokens:", self.tokenizer.tokenize(self.contexts[i][start_char_pos:end_char_pos]))
+        for i, offsets in enumerate(self.offset_mapping):
+        # for i, (context, answer) in enumerate(zip(self.contexts, self.answers)):
+            input_ids = self.encodings["input_ids"][i].tolist()
+            cls_index = input_ids.index(self.tokenizer.cls_token_id)
+            sequence_ids = self.tokenizer.get_special_tokens_mask(input_ids, already_has_special_tokens=True)
             
-            for j, (offset_start, offset_end) in enumerate(offsets[context_start_token_pos:]):
-            
-                token_start = token_end = None
+            sample_index = self.sample_mapping[i]
+            context = self.contexts[sample_index]
+            answer = self.answers[sample_index]
+            start_char_pos, end_char_pos = map(int, self.spans[sample_index])
+            question = self.questions[self.sample_mapping[i]]
 
-                for j, (offset_start, offset_end) in enumerate(offsets[context_start_token_pos:]):  # Only look within the context offsets
-                    # Check if the token starts or ends within the given answer span
-                    
-                    if offset_start == start_char_pos or (token_start is None and offset_start > start_char_pos):
-                        token_start = j + context_start_token_pos
-                    if offset_end == end_char_pos:
-                        token_end = j + context_start_token_pos
-                        break  # We can break early once we find the end token
-                    
-                    current_span = context[offset_start:offset_end]
-                    if current_span == answer:
-                        token_start = j + context_start_token_pos
-                        token_end = token_start + len(self.tokenizer.tokenize(answer)) - 1  # Adjust for multi-token answers
-                        break
-                        
-                if token_start is None or token_end is None:
-                    raise ValueError(f"Token span for answer '{answer}' not found in context {i}.")
-            
-                self.start_positions.append(token_start)
-                self.end_positions.append(token_end)
+            # To adjust answer spans that might be off by one or two characters
+            if context[start_char_pos:end_char_pos] != answer and context[start_char_pos-1:end_char_pos-1] == answer:
+                start_char_pos -= 1
+                end_char_pos -= 1
+            elif context[start_char_pos-2:end_char_pos-2] == answer:
+                start_char_pos -= 2
+                end_char_pos -= 2
+
+            # To find start and end of context
+            token_start_index = 0
+            while sequence_ids[token_start_index] != 1:
+                token_start_index += 1
+
+            token_end_index = len(input_ids) - 1
+            while sequence_ids[token_end_index] != 1:
+                token_end_index -= 1
+
+            # To find answers that are out of the span
+            if not (offsets[token_start_index][0] <= start_char_pos and offsets[token_end_index][1] >= end_char_pos):
+                self.start_positions.append(cls_index)
+                self.end_positions.append(cls_index)
+            else:
+                while token_start_index < len(offsets) and offsets[token_start_index][0] <= start_char_pos:
+                    token_start_index += 1
+                self.start_positions.append(token_start_index - 1)
+
+                while offsets[token_end_index][1] >= end_char_pos:
+                    token_end_index -= 1
+                self.end_positions.append(token_end_index + 1)
 
     def __len__(self):
         return len(self.contexts)
