@@ -25,7 +25,7 @@ def read_content(file_path):
     with open(file_path, encoding='utf-8') as f:
         return f.read().split("\t")
 
-class SquadDataset(Dataset):
+class biLSTMDataset(Dataset):
     def __init__(self, in_path):
         self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
@@ -57,7 +57,6 @@ class SquadDataset(Dataset):
         self.offset_mapping = self.encodings.pop("offset_mapping")
 
         for i, offsets in enumerate(self.offset_mapping):
-        # for i, (context, answer) in enumerate(zip(self.contexts, self.answers)):
             input_ids = self.encodings["input_ids"][i].tolist()
             cls_index = input_ids.index(self.tokenizer.cls_token_id)
             sequence_ids = self.tokenizer.get_special_tokens_mask(input_ids, already_has_special_tokens=True)
@@ -66,7 +65,6 @@ class SquadDataset(Dataset):
             context = self.contexts[sample_index]
             answer = self.answers[sample_index]
             start_char_pos, end_char_pos = map(int, self.spans[sample_index])
-            question = self.questions[self.sample_mapping[i]]
 
             # To adjust answer spans that might be off by one or two characters
             if context[start_char_pos:end_char_pos] != answer and context[start_char_pos-1:end_char_pos-1] == answer:
@@ -273,7 +271,7 @@ def objective(params):
     test_path = args.test_path
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
-    train_set = SquadDataset(train_path)
+    train_set = biLSTMDataset(train_path)
 
     for i in range(5):
         sample = train_set[i]
@@ -284,7 +282,7 @@ def objective(params):
         print("End Position:", sample["end_position"])
         print("-----")
 
-    test_set = SquadDataset(test_path)
+    test_set = biLSTMDataset(test_path)
 
     model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
     print(model)
@@ -311,8 +309,8 @@ def main(args):
     # test_outputs = test(model, dataset=test_set, device=device)
     # print(test_outputs)
 
-    # train_set = SquadDataset(train_path)
-    # test_set = SquadDataset(test_path)
+    # train_set = biLSTMDataset(train_path)
+    # test_set = biLSTMDataset(test_path)
 
     # model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
     # train(model, train_set, num_epoch=10, batch_size=16, device=device)
