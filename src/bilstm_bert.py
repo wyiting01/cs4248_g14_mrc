@@ -18,6 +18,7 @@ num_labels=10
 batch_size=10
 learning_rate=5e-5
 num_epoch=10
+dropout_rate=0.1
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -118,18 +119,22 @@ class BERT_BiLSTM(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
-        self.bilstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
-        # self.classifier = nn.Linear(hidden_dim*2, num_labels)  # multiply for bidirectional
-        self.start_classifier = nn.Linear(hidden_dim*2, 1) 
-        self.end_classifier = nn.Linear(hidden_dim*2, 1)
+        self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
+        self.linear = nn.Linear(hidden_dim*2, num_labels)  # multiply for bidirectional
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_rate)
+        self.start_out = nn.Linear(hidden_dim, 1)
+        self.end_out = nn.Linear(hidden_dim, 1)
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
         lstm_out, _ = self.bilstm(bert_outputs['last_hidden_state'])
-        # logits = self.classifier(lstm_out)
-        start_logits = self.start_classifier(lstm_out).squeeze(-1)
-        end_logits = self.end_classifier(lstm_out).squeeze(-1)
-        return start_logits.squeeze(-1), end_logits.squeeze(-1)  # Returns two tensors of shape [batch_size, seq_length]
+        linear_out = self.linear(lstm_out)
+        relu_out = self.relu(linear_out)
+        dropout_out = self.dropout(relu_out)
+        start_logits = self.start_classifier(dropout_out).squeeze(-1)
+        end_logits = self.end_classifier(dropout_out).squeeze(-1)
+        return start_logits, end_logits 
 
 # train
 # Pad to the right side
