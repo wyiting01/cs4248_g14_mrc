@@ -38,11 +38,13 @@ class biLSTMDataset(Dataset):
         questions = read_content(f"{in_path}/question")
         answers = read_content(f"{in_path}/answer")
         spans = read_content(f"{in_path}/answer_span")
+        question_ids = read_content(f"{in_path}/question_id")
 
         self.contexts = [ctx.strip() for ctx in contexts]
         self.questions = [qn.strip() for qn in questions]
         self.answers = [ans.strip() for ans in answers]
         self.spans = [span.strip().split() for span in spans]
+        self.question_ids = [question_ids.strip() for id in question_ids]
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
@@ -109,7 +111,8 @@ class biLSTMDataset(Dataset):
             "input_ids": self.encodings["input_ids"][idx],
             "attention_mask": self.encodings["attention_mask"][idx],
             "start_position": self.start_positions[idx],
-            "end_position": self.end_positions[idx]
+            "end_position": self.end_positions[idx],
+            "question_ids": self.question_ids[idx]
         }
         return item
 
@@ -132,8 +135,8 @@ class BERT_BiLSTM(nn.Module):
         linear_out = self.linear(lstm_out)
         relu_out = self.relu(linear_out)
         dropout_out = self.dropout(relu_out)
-        start_logits = self.start_classifier(dropout_out).squeeze(-1)
-        end_logits = self.end_classifier(dropout_out).squeeze(-1)
+        start_logits = self.start_out(dropout_out).squeeze(-1)
+        end_logits = self.end_out(dropout_out).squeeze(-1)
         return start_logits, end_logits 
 
 # train
