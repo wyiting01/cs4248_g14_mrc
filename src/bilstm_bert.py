@@ -44,7 +44,7 @@ class biLSTMDataset(Dataset):
         self.questions = [qn.strip() for qn in questions]
         self.answers = [ans.strip() for ans in answers]
         self.spans = [span.strip().split() for span in spans]
-        self.question_ids = [question_ids.strip() for id in question_ids]
+        self.question_ids = [id.strip() for id in question_ids]
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
