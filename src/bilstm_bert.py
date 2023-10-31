@@ -10,9 +10,7 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials 
 
-torch.manual_seed(0)
-
-# Default hyperparam
+# Default hyperparameters
 input_size=28
 hidden_dim=256
 num_layers=2
@@ -20,6 +18,12 @@ num_labels=10
 batch_size=10
 learning_rate=5e-5
 num_epoch=10
+
+# Ensure no randomisation for every iteration of run.
+def seed_all(seed=0):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 def read_content(file_path):
     with open(file_path, encoding='utf-8') as f:
