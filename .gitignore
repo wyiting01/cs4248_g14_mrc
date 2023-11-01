@@ -11,3 +11,7 @@
 
 # Model Checkpoints
 *.pt
+/.vs/slnx.sqlite
+/.vs/ProjectSettings.json
+/.vs/cs4248_g14_mrc/v16/Browse.VC.db
+/.vs/cs4248_g14_mrc/v16/.suo
