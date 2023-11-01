@@ -30,7 +30,7 @@ def main():
     test_answers = {}
 
     for i in range(len(answers)):
-        print(i)
+        # print(i)
         test_answers[qid[i]] = answers[i]
         
     
