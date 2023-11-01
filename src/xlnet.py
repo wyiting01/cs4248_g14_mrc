@@ -247,7 +247,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 ctxt = context[i]
                 qid = qids[i]
 
-                valid_answers = []
+                valid_answers = {}
                 for start in start_indexes:
                     for end in end_indexes:
                         start_index = start_top_indexes[start]
@@ -268,18 +268,14 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                         if start_index <= end_index:
                             start_char = offsets[start_index][0]
                             end_char = offsets[end_index][1]
-                            valid_answers.append(
-                                {
-                                    "score": start_logits[start] + end_logits[end],
-                                    "text": ctxt[start_char: end_char]
-                                }
-                            )
+                            
+                            pred_answer = ctxt[start_char: end_char]
+                            pred_score = start_logits[start] + end_logits[end]
+                            candidate_answer = {pred_answer:pred_score}
+                            valid_answers.update(candidate_answer)
 
-                valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
-                if len(valid_answers) == 0:
-                    pred[qid] = ""
-                else:
-                    pred[qid] = valid_answers[0]['text']
+                valid_answers = dict(sorted(valid_answers.items(), key=lambda item: item[1], reverse=True)[:n_best_size])
+                pred[qid] = valid_answers
 
     return pred
 
