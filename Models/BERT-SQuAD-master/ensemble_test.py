@@ -43,11 +43,10 @@ def main():
     bert = QA('model')
 
     for i in range(len(questions)):
-        print(i)
-        curr_ans = bert.predict(contexts[i], questions[i])
+        # print(i)
+        curr_ans = bert.predict_full(contexts[i], questions[i])
         answers[qid[i]] = {}
-        answers[qid[i]] = curr_ans['answer']
-        for j in range(curr_ans.keys):
+        for j in range(len(curr_ans)):
             answers[qid[i]][curr_ans[j]['answer']] = curr_ans[j]['confidence']
     
     with open(args.output_file, 'w+') as f:
