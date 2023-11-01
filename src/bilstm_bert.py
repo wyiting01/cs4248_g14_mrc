@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials 
+from sklearn.model_selection import RepeatedKFold
 
 # Default hyperparameters
 input_size=28
@@ -44,7 +45,7 @@ class biLSTMDataset(Dataset):
         self.questions = [qn.strip() for qn in questions]
         self.answers = [ans.strip() for ans in answers]
         self.spans = [span.strip().split() for span in spans]
-        self.question_ids = [question_ids.strip() for id in question_ids]
+        self.question_ids = [id.strip() for id in question_ids]
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
@@ -123,21 +124,21 @@ class BERT_BiLSTM(nn.Module):
         self.num_layers = num_layers
         self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
         self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
-        self.linear = nn.Linear(hidden_dim*2, num_labels)  # multiply for bidirectional
-        self.relu = nn.ReLU()
+        self.start_out = nn.Linear(hidden_dim * 2, 1)
+        self.end_out = nn.Linear(hidden_dim * 2, 1)
         self.dropout = nn.Dropout(dropout_rate)
-        self.start_out = nn.Linear(hidden_dim, 1)
-        self.end_out = nn.Linear(hidden_dim, 1)
+        self.relu = nn.ReLU()
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
         lstm_out, _ = self.lstm(bert_outputs['last_hidden_state'])
-        linear_out = self.linear(lstm_out)
-        relu_out = self.relu(linear_out)
+        max_pooled = F.adaptive_max_pool1d(lstm_out.permute(0, 2, 1), 1).squeeze(-1)
+        relu_out = self.relu(max_pooled)
         dropout_out = self.dropout(relu_out)
+
         start_logits = self.start_out(dropout_out).squeeze(-1)
         end_logits = self.end_out(dropout_out).squeeze(-1)
-        return start_logits, end_logits 
+        return start_logits, end_logits
 
 # train
 # Pad to the right side
@@ -161,7 +162,7 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
 
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+    criterion = nn.BCEWithLogitsLoss()
 
     start = datetime.datetime.now()
     for epoch in range(num_epoch):
@@ -173,8 +174,8 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             
-            start_positions = batch["start_positions"].to(device)
-            end_positions = batch["end_positions"].to(device)
+            start_positions = batch["start_positions"].float().to(device)
+            end_positions = batch["end_positions"].float().to(device)
             
             # Forward pass
             start_logits, end_logits = model(input_ids, attention_mask)
@@ -223,17 +224,17 @@ def test(model, dataset, device='cpu'):
     model.eval()
     test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
     
-    # total_start_pos = []
-    # total_end_pos = []
-
     total_f1 = 0
     total_em = 0
+
+    # pred = {}
 
     with torch.no_grad():
         for batch in test_loader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            
+            start = batch["start_position"].to(device)
+            end = batch["end_position"].to(device)
             start_logits, end_logits = model(input_ids, attention_mask)
 
             # Getting the most likely start and end positions
@@ -253,6 +254,7 @@ def test(model, dataset, device='cpu'):
                 if pred_answer == true_answer:
                     total_em += 1
                 total_f1 += get_f1(pred_answer, true_answer)
+
     print(total_em)
     n = len(dataset)
     avg_f1 = total_f1/n
@@ -285,15 +287,6 @@ def objective(params):
     
     train_set = biLSTMDataset(train_path)
 
-    for i in range(5):
-        sample = train_set[i]
-        print("-----data_loaded-----")
-        print("Context:", train_set.contexts[i])
-        print("Tokenized Input IDs:", sample["input_ids"])
-        print("Start Position:", sample["start_position"])
-        print("End Position:", sample["end_position"])
-        print("-----")
-
     test_set = biLSTMDataset(test_path)
 
     model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
@@ -304,6 +297,177 @@ def objective(params):
     
     acc = test(model, dataset=test_set, device=device)
     return {'loss': acc, 'status': STATUS_OK}
+
+## SPLIT FOR KFOLDS HERE
+def split_and_train(model, dataset, batch_size, learning_rate, num_epochs, device, model_path):
+    print('Starting training')
+    seed_all()
+
+    x_train = dataset.get_texts_and_questions()
+    y_train = torch.tensor(dataset.get_labels_vocab())
+
+    print(len(x_train), len(y_train))
+    assert(len(x_train) == len(y_train))
+
+    #dataloader = DataLoader(dataset, batch_size=batch_size)
+
+    # Combines a Sigmoid layer and the BCELoss in one single class
+    criterion = nn.BCEWithLogitsLoss(reduction='sum')
+
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    
+    # Perform Stratified K-Folds cross-validations.
+    kfold = RepeatedKFold(n_splits=num_splits, random_state=seed)
+
+    for i, (train_index, valid_index) in enumerate(kfold.split(x_train, y_train)):
+        seed_all(i * 100 + i)
+
+        x_train_fold = x_train[train_index.astype(int)].to(torch.long)
+        y_train_fold = y_train[train_index.astype(int), np.newaxis].to(torch.float32)
+
+        x_val_fold = x_train[valid_index.astype(int)].to(torch.long)
+        y_val_fold = y_train[valid_index.astype(int), np.newaxis].to(torch.float32)
+
+        train_set = biLSTMDataset(x=x_train_fold, y=y_train_fold)
+        valid_set = biLSTMDataset(x=x_val_fold, y=y_val_fold)
+
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+        valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+        
+        print(f'Fold {i + 1}')
+
+        start_time = datetime.datetime.now()
+
+        for epoch in range(num_epochs):
+            model.train()
+            avg_loss = 0.0
+            for step, batch in enumerate(train_loader, 0):
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+            
+                start_positions = batch["start_positions"].to(device)
+                end_positions = batch["end_positions"].to(device)
+
+                optimizer.zero_grad()
+
+                start_logits, end_logits = model(input_ids, attention_mask)
+
+                start_loss = criterion(start_logits, start_positions)
+                end_loss = criterion(end_logits, end_positions)
+                loss = (start_loss + end_loss) / 2
+
+                loss.backward()
+
+                optimizer.step()
+
+                avg_loss = loss.item() / len(dataloader)
+
+                if step % 100 == 99:
+                    print('[%d, %5d] loss: %.3f' %
+                        (epoch + 1, step + 1, loss / 100))
+
+            model.eval()
+
+            valid_preds_fold = np.zeros((x_val_fold.size(0)))
+            test_preds_fold = np.zeros((dataset.__len__()))
+
+            avg_val_loss = 0
+
+            for batch in valid_loader:
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+            
+                start_positions = batch["start_positions"].to(device)
+                end_positions = batch["end_positions"].to(device)
+
+                optimizer.zero_grad()
+
+                start_logits, end_logits = model(input_ids, attention_mask)
+
+                start_loss = criterion(start_logits, start_positions)
+                end_loss = criterion(end_logits, end_positions)
+                loss = (start_loss + end_loss) / 2
+
+                avg_loss = loss.item() / len(valid_loader)
+                valid_preds_fold[index] = sigmoid(y_pred.cpu().numpy())[:, 0]
+
+            if step % 100 == 99:
+                print('Epoch[%d, %5d] average loss: %.3f average validation loss: %.3f' %
+                    (epoch + 1, step + 1, loss / 100, avg_val_loss / 100))
+
+        avg_losses_f.append(avg_loss)
+        avg_val_losses_f.append(avg_val_loss)
+
+        test_outputs = test(model, dataset=test_dataset, device=device)
+        print(test_outputs)
+
+    end_time = datetime.datetime.now()
+
+    total_time = (end_time - start_time).seconds / 60.0
+
+    print('Training finished in {} minutes.'.format(total_time))
+
+    checkpoint = {
+        'epoch': num_epochs,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+
+    torch.save(checkpoint, model_path)
+
+    print("Model saved in ", model_path)
+
+## FINAL TEST AGAIN FOR EVAL
+def test_eval(model, dataset, device='cpu'):
+    model.eval()
+    test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
+    
+    total_f1 = 0
+    total_em = 0
+
+    pred = {}
+
+    with torch.no_grad():
+        for batch in test_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            start = batch["start_position"].to(device)
+            end = batch["end_position"].to(device)
+            question_ids = batch["question_ids"].to(device)
+
+            model_output = model(input_ids, attention_mask)
+
+            for i in range(input_ids.size(0)):
+                start_logits = model_output.start_top_log_probs[i].cpu().detach().numpy()
+                end_logits = model_output.end_top_log_probs[i].cpu().detach().numpy()
+
+                # Getting the most likely start and end positions
+                start_pos = torch.argmax(start_logits, dim=1)
+                end_pos = torch.argmax(end_logits, dim=1)
+
+                pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
+                true_answer = dataset.answers[i]
+                print("-----TEST-----")
+                print(f"Sample {i+1}:")
+                print("Predicted Answer:", pred_answer)
+                print("True Answer:", true_answer)
+                if pred_answer == true_answer:
+                    total_em += 1
+                total_f1 += get_f1(pred_answer, true_answer)
+
+                question_id = question_ids[i]
+
+    print(total_em)
+    n = len(dataset)
+    avg_f1 = total_f1/n
+    avg_em = total_em/n
+
+    # return total_start_pos, total_end_pos
+    # TODO: check which metric to use, and if weighted average is a 
+    # return avg_f1, avg_em 
+    return -(0.5 * avg_f1 + 0.5 * avg_em)
 
 def main(args):
     train_path = args.train_path

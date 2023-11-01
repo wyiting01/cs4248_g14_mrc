@@ -9,7 +9,12 @@ python src/preprocessing.py --file_path "data/raw/dev-v1.1.json" --test
 
 import argparse
 import json
+import requests
 import numpy as np
+
+# Adapted from: https://stackoverflow.com/questions/42329766/python-nlp-british-english-vs-american-english
+url = "https://raw.githubusercontent.com/hyperreality/American-British-English-Translator/master/data/american_spellings.json"
+american_to_british_dict = requests.get(url).json()
 
 def write_to_file(out, path_name):
     with open(path_name, 'w', encoding='utf-8') as out_file:
@@ -56,12 +61,56 @@ def preprocess_and_write(dataset):
 
     for i in indices:
         (question_id, question, answer, context, answer_span) = examples[i]
-        ctxt.append(context)
-        qns.append(question)
-        ans.append(answer)
-        span.append(answer_span)
-        qns_id.append(question_id)
+        ctxt.append(clean_text(context))
+        qns.append(clean_text(question))
+        ans.append(clean_text(answer))
+        span.append(clean_text(answer_span))
+        qns_id.append(clean_text(question_id))
     return ctxt, qns, ans, span, qns_id
+
+# Clean up input text to be more standardised (spelling & word form) and decrease dictionary size.
+# This does not expand contractions (isn't -> is not) because answer span will be affected.
+# Note: Due to nature of questions & answers, cannot remove all special characters as they are present in them.
+def clean_text(text):
+    text = text.lower()
+
+    # Clean non-ASCII dashes.
+    text = clean_dashes(text)
+
+    # Clean non-ASCII apostrophes and quotation marks.
+    text = clean_contractions(text)
+
+    # Changes some American spellings into British spellings. Cannot change all due to answer span.
+    text = standardise_spelling(text)
+
+    return text
+
+# Remove non-ASCII dashes.
+def clean_dashes(text):
+    text = text.replace(u'\u2013', '-')
+    return text
+
+# Remove non-ASCII quotes.
+def clean_contractions(text):
+    specials = [u'\u2018', u'\u2019', u'\u00B4', u'\u0060']
+    for s in specials:
+        text = text.replace(s, "'")
+    return text
+
+# Converts some words from American spelling to British spelling. Note that not all words
+# can be converted due to nature of answer spans being fixed.
+# e.g. affects z -> s spellings and not 'or' -> 'our' spellings.
+def standardise_spelling(text):
+    words = text.split()
+    for i in range(len(words)):
+        if words[i] not in american_to_british_dict.keys():
+            continue
+        elif len(words[i]) == len(american_to_british_dict[words[i]]):
+            # Don't change if the length of words are different as this will affect answer span.
+            words[i] = american_to_british_dict[words[i]]
+    text = ' '.join(words)
+    return text
+
 
 def main(args):
     dataset = data_from_json(args.file_path)
