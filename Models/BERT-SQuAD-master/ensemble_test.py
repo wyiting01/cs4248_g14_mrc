@@ -45,7 +45,10 @@ def main():
     for i in range(len(questions)):
         print(i)
         curr_ans = bert.predict(contexts[i], questions[i])
+        answers[qid[i]] = {}
         answers[qid[i]] = curr_ans['answer']
+        for j in range(curr_ans.keys):
+            answers[qid[i]][curr_ans[j]['answer']] = curr_ans[j]['confidence']
     
     with open(args.output_file, 'w+') as f:
             json.dump(answers, f)
