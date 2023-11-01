@@ -1,8 +1,8 @@
 # CS4248 G14 Machine Reading Comprehension on SQuAD
 
-# Base Models
+## Base Models
 
-## Results
+### Results
 The table below is the Exact and F1 scores evaluted from the official SQuAD evaluation script `evaluate-v2.0.py`.  
 
 | Model | Exact | F1 |
@@ -16,11 +16,11 @@ To run the evaluation script with model predictions `pred.json`, simply run the 
 python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 ```
 
-## 1. BERT
+### 1. BERT
 - Script: `src/bert.py`
 - Model: BERT-SQuAD
 
-## 2. XLNet
+### 2. XLNet
 - Script: `src/xlnet.py`
 - Model: [XLNetForQuestionAnswering](https://huggingface.co/docs/transformers/model_doc/xlnet#transformers.XLNetForQuestionAnswering)
 
@@ -33,8 +33,8 @@ python xlnet.py --train --data_path "../data/curated/training_data" --model_path
 python xlnet.py --test --data_path "../data/curated/test_data" --model_path "./xlnet.pt" --output_path "./pred.json"
 ```
 
-## 3. biLSTM
+### 3. biLSTM
 - Script: ``
 - Model:
 
-# Ensemble Models
+## Ensemble Models
