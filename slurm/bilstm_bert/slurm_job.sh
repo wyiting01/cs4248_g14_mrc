@@ -7,3 +7,5 @@
 #SBATCH --gpus=v100:1
 #SBATCH --partition=medium
 #SBATCH -o cs4248_g14.out
+
+srun bilstm.sh

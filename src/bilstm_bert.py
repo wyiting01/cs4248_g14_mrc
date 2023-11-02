@@ -16,10 +16,11 @@ from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 Need to install libraries for numpy, sklearn, transformers:
 
 pip install numpy
+pip install torch
 pip install -U scikit-learn
 pip install transformers
 
-To run, use command: python3 src/bilstm-bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt
+To run, use command: python3 src/bilstm_bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt
 '''
 
 # Default hyperparameters
@@ -68,6 +69,10 @@ class biLSTMDataset(Dataset):
             
             # Initially cannot split because of how k fold works.
             self.spans = [span.split() for span in self.spans]
+
+        print(self.contexts[0])
+
+        print(self.spans[0])
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
