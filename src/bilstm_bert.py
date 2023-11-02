@@ -240,7 +240,7 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 optimizer.step()
 
-                avg_loss = loss.item() / len(train_loader)
+                avg_loss += loss.item() / len(train_loader)
 
                 if step % 100 == 99:
                     print('[%d, %5d] loss: %.3f' %
@@ -265,7 +265,7 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 end_loss = criterion(end_logits, end_positions.to(torch.float))
                 loss = (start_loss + end_loss) / 2
 
-                avg_loss = loss.item() / len(valid_loader)
+                avg_val_loss += loss.item() / len(valid_loader)
 
             if step % 100 == 99:
                 print('Epoch[%d, %5d] average loss: %.3f average validation loss: %.3f' %
