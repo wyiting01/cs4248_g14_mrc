@@ -1,8 +1,10 @@
 """
 The preprocessing function will read in the train and dev json file and extracts the context, question, answer text and answer span (start and end indices in term of character) and save them into different file separated by a tab.
 
-To run the file in root directory, use the following commands
+The clean_text function is to clean up the raw text by eliminating non-ASCII dashes, expanding contractions, and standardizing spellings. 
+However, it was ultimately omitted from the final implementation because it did not result in any accuracy improvement.
 
+To run the file in root directory, use the following commands
 python src/preprocessing.py --file_path "data/raw/train-v1.1.json" --train
 python src/preprocessing.py --file_path "data/raw/dev-v1.1.json" --test
 """
@@ -50,6 +52,7 @@ def preprocess_and_write(dataset):
 
                 examples.append((question_id, question, ans_text, context, ' '.join([str(ans_start), str(ans_end)])))
 
+    np.random.seed(seed=4248)
     indices = list(range(len(examples)))
     np.random.shuffle(indices)
 
@@ -61,11 +64,11 @@ def preprocess_and_write(dataset):
 
     for i in indices:
         (question_id, question, answer, context, answer_span) = examples[i]
-        ctxt.append(clean_text(context))
-        qns.append(clean_text(question))
-        ans.append(clean_text(answer))
-        span.append(clean_text(answer_span))
-        qns_id.append(clean_text(question_id))
+        ctxt.append(context)
+        qns.append(question)
+        ans.append(answer)
+        span.append(answer_span)
+        qns_id.append(question_id)
     return ctxt, qns, ans, span, qns_id
 
 # Clean up input text to be more standardised (spelling & word form) and decrease dictionary size.
