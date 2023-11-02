@@ -25,7 +25,7 @@ To run, use command: python3 src/bilstm_bert.py --train_path data/curated/traini
 
 # Default hyperparameters
 input_size=28
-hidden_dim=256
+hidden_dim=64
 num_layers=2
 num_labels=10
 batch_size=10
@@ -69,6 +69,13 @@ class biLSTMDataset(Dataset):
             
             # Initially cannot split because of how k fold works.
             self.spans = [span.split() for span in self.spans]
+
+        # For debugging, something inherently wrong with current code.
+        self.contexts = self.contexts[:10]
+        self.questions = self.questions[:10]
+        self.answers = self.answers[:10]
+        self.spans = self.spans[:10]
+        self.question_ids = self.question_ids[:10]
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
@@ -187,6 +194,9 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
     kfold = RepeatedKFold(n_splits=num_splits, random_state=seed)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+
+    avg_losses_f = []
+    avg_val_losses_f = []
     print("Beginning folding")
 
     for i, (train_index, valid_index) in enumerate(kfold.split(x_train, y_train)):
@@ -238,9 +248,6 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
             model.eval()
 
-            valid_preds_fold = np.zeros((x_val_fold.size(0)))
-            test_preds_fold = np.zeros((dataset.__len__()))
-
             avg_val_loss = 0
 
             for batch in valid_loader:
@@ -259,7 +266,6 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 loss = (start_loss + end_loss) / 2
 
                 avg_loss = loss.item() / len(valid_loader)
-                valid_preds_fold[index] = sigmoid(y_pred.cpu().numpy())[:, 0]
 
             if step % 100 == 99:
                 print('Epoch[%d, %5d] average loss: %.3f average validation loss: %.3f' %
@@ -268,8 +274,19 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
         avg_losses_f.append(avg_loss)
         avg_val_losses_f.append(avg_val_loss)
 
-        test_outputs = test(model, dataset=test_dataset, device=device)
-        print(test_outputs)
+    print('All \t loss={:.4f} \t val_loss={:.4f} \t '.format(np.average(avg_losses_f),np.average(avg_val_losses_f)))
+
+    checkpoint = {
+        'epoch': num_epoch,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+    torch.save(checkpoint, model_path)
+
+    print('Model saved in ', model_path)
+    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
 
 
 def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
