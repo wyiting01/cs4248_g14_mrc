@@ -271,9 +271,8 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                             end_char = offsets[end_index][1]
                             pred_answer = ctxt[start_char: end_char] 
                             pred_score = start_logits[start] + end_logits[end]
-                            valid_answers.update(
-                                {pred_answer : str(pred_score)}
-                            )
+                            if valid_answers.get(pred_answer) == None or float(valid_answers.get(pred_answer)) < pred_score:
+                                valid_answers[pred_answer] = str(pred_score)
 
                 valid_answers = dict(sorted(valid_answers.items(), key=lambda x: float(x[1]), reverse=True)[:n_best_size])
                 if len(valid_answers) == 0:
