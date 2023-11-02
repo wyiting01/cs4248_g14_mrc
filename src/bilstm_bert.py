@@ -70,10 +70,6 @@ class biLSTMDataset(Dataset):
             # Initially cannot split because of how k fold works.
             self.spans = [span.split() for span in self.spans]
 
-        print(self.contexts[0])
-
-        print(self.spans[0])
-
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
                                         padding="max_length",
