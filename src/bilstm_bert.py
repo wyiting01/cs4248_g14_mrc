@@ -77,8 +77,7 @@ class biLSTMDataset(Dataset):
         self.spans = self.spans[:10]
         self.question_ids = self.question_ids[:10]
 
-        self.encodings = self.tokenizer(self.questions,
-                                        self.contexts,
+        self.encodings = self.tokenizer(self.questions, self.contexts,
                                         padding="max_length",
                                         max_length=384,
                                         stride=128,
@@ -189,11 +188,13 @@ def collate_fn(batch):
         "end_positions": torch.tensor(end_positions)
     }
 
-def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epochs, device, model_path):
+def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epochs, device, model_path, test_set):
     # Perform Stratified K-Folds cross-validations.
     kfold = KFold(n_splits=num_splits)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
     start = datetime.datetime.now()
 
@@ -213,8 +214,8 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
         train_set = biLSTMDataset(x=x_train_fold, y=y_train_fold)
         valid_set = biLSTMDataset(x=x_val_fold, y=y_val_fold)
 
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-        valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+        valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
         
         print(f'Fold {i + 1}')
 
@@ -275,6 +276,44 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
         avg_losses_f.append(avg_loss)
         avg_val_losses_f.append(avg_val_loss)
+
+        total_f1 = 0
+        total_em = 0
+
+        for i, batch in enumerate(test_loader):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            
+            start_logits, end_logits = model(input_ids, attention_mask)
+
+            print(f"Sample logits {start_logits}, {end_logits}")
+
+            # Getting the most likely start and end positions
+            start_pos = torch.argmax(start_logits, dim=0)
+            end_pos = torch.argmax(end_logits, dim=0)
+            
+            # total_start_pos.extend(start_pos.cpu().numpy())
+            # total_end_pos.extend(end_pos.cpu().numpy())
+            print(f"Sample range {start_pos}, {end_pos}")
+
+            for i in range(input_ids.size(0)):
+                pred_answer = test_set.tokenizer.decode(input_ids[i, start_pos.item():end_pos.item()+1])
+                true_answer = test_set.answers[i]
+                print("-----TEST-----")
+                print(f"Sample {i+1}:")
+                print("Predicted Answer:", pred_answer)
+                print("True Answer:", true_answer)
+                if pred_answer == true_answer:
+                    total_em += 1
+                total_f1 += get_f1(pred_answer, true_answer)
+
+
+        print(total_em)
+        n = len(test_set)
+        avg_f1 = total_f1/n
+        avg_em = total_em/n
+
+        print(-(0.5 * avg_f1 + 0.5 * avg_em))
 
     end = datetime.datetime.now()
 
@@ -371,12 +410,15 @@ def test(model, dataset, device='cpu'):
             
             start_logits, end_logits = model(input_ids, attention_mask)
 
+            print(f"Sample logits {start_logits}, {end_logits}")
+
             # Getting the most likely start and end positions
             start_pos = torch.argmax(start_logits, dim=0)
             end_pos = torch.argmax(end_logits, dim=0)
             
             # total_start_pos.extend(start_pos.cpu().numpy())
             # total_end_pos.extend(end_pos.cpu().numpy())
+            print(f"Sample range {start_pos}, {end_pos}")
 
             for i in range(input_ids.size(0)):
                 pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos.item():end_pos.item()+1])
@@ -476,15 +518,16 @@ def main(args):
     model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
 
     x_train, y_train = extractAndMergeData(train_path)
-    
-    split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path)
-    #train_set = biLSTMDataset(train_path)
+
     test_set = biLSTMDataset(test_path)
+
+    split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
+    #train_set = biLSTMDataset(train_path)
 
     #train(model, train_set, num_epoch=10, batch_size=16, device=device)
     
-    test_outputs = test(model, dataset=test_set, device=device)
-    print(test_outputs)
+    #test_outputs = test(model, dataset=test_set, device=device)
+    #print(test_outputs)
 
     print('\n==== All done ====')
 
