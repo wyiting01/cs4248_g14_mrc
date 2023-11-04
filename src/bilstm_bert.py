@@ -71,13 +71,14 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        self.contexts = self.contexts[:10]
-        self.questions = self.questions[:10]
-        self.answers = self.answers[:10]
-        self.spans = self.spans[:10]
-        self.question_ids = self.question_ids[:10]
+        self.contexts = self.contexts
+        self.questions = self.questions
+        self.answers = self.answers
+        self.spans = self.spans
+        self.question_ids = self.question_ids
 
-        self.encodings = self.tokenizer(self.questions, self.contexts,
+        self.encodings = self.tokenizer(self.questions,
+                                        self.contexts,
                                         padding="max_length",
                                         max_length=384,
                                         stride=128,
@@ -147,24 +148,31 @@ class biLSTMDataset(Dataset):
         }
         return item
 
-class BERT_BiLSTM(nn.Module):
+class BERT_BiLSTM(nn.Module):   
     def __init__(self, input_size, hidden_dim, num_layers, num_labels):
         super(BERT_BiLSTM, self).__init__()
         self.hidden_dim = hidden_dim
+
+        # Currently unused params - removable (?)
         self.num_layers = num_layers
+        self.num_labels = num_labels
+        
         self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
         self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
         self.start_out = nn.Linear(hidden_dim * 2, 1)
         self.end_out = nn.Linear(hidden_dim * 2, 1)
         self.dropout = nn.Dropout(dropout_rate)
-        self.relu = nn.ReLU()
+        #self.relu = nn.ReLU()
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
+
         lstm_out, _ = self.lstm(bert_outputs['last_hidden_state'])
+
         max_pooled = F.adaptive_max_pool1d(lstm_out.permute(0, 2, 1), 1).squeeze(-1)
-        relu_out = self.relu(max_pooled)
-        dropout_out = self.dropout(relu_out)
+
+        #relu_out = self.relu(max_pooled)
+        dropout_out = self.dropout(max_pooled)
 
         start_logits = self.start_out(dropout_out).squeeze(-1)
         end_logits = self.end_out(dropout_out).squeeze(-1)
@@ -235,6 +243,11 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
+                if (i == 1 and step == 1):
+                    print(f"Start: {start_positions} End: {end_positions}")
+                    print(f"Start logits {start_logits}")
+                    print(f"End logits {end_logits}")
+
                 start_loss = criterion(start_logits, start_positions.to(torch.float))
                 end_loss = criterion(end_logits, end_positions.to(torch.float))
                 loss = (start_loss + end_loss) / 2
@@ -286,18 +299,23 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
             
             start_logits, end_logits = model(input_ids, attention_mask)
 
-            print(f"Sample logits {start_logits}, {end_logits}")
-
             # Getting the most likely start and end positions
-            start_pos = torch.argmax(start_logits, dim=0)
-            end_pos = torch.argmax(end_logits, dim=0)
+            # start_pos = torch.argmax(start_logits, dim=0)
+            # end_pos = torch.argmax(end_logits, dim=0)
             
             # total_start_pos.extend(start_pos.cpu().numpy())
             # total_end_pos.extend(end_pos.cpu().numpy())
-            print(f"Sample range {start_pos}, {end_pos}")
+            #print(f"Sample range {start_pos}, {end_pos}")
 
             for i in range(input_ids.size(0)):
-                pred_answer = test_set.tokenizer.decode(input_ids[i, start_pos.item():end_pos.item()+1])
+                #pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
+                #pred_answer = test_set.tokenizer.decode(input_ids[i, round(abs(start_logits[i] * len(input_ids[i]))) : round(abs((end_logits[i] + 1) * len(input_ids[i])))])
+                start = round(abs(start_logits[i].item()) * len(test_set.contexts[i]))
+                end = round(abs(end_logits[i].item()) * len(test_set.contexts[i])) + 1
+
+                # If start > end, nothing is printed.
+
+                pred_answer = " ".join(test_set.contexts[i].split()[start: end])    
                 true_answer = test_set.answers[i]
                 print("-----TEST-----")
                 print(f"Sample {i+1}:")
@@ -413,15 +431,15 @@ def test(model, dataset, device='cpu'):
             print(f"Sample logits {start_logits}, {end_logits}")
 
             # Getting the most likely start and end positions
-            start_pos = torch.argmax(start_logits, dim=0)
-            end_pos = torch.argmax(end_logits, dim=0)
+            #start_pos = torch.argmax(start_logits, dim=0)
+            #end_pos = torch.argmax(end_logits, dim=0)
             
             # total_start_pos.extend(start_pos.cpu().numpy())
             # total_end_pos.extend(end_pos.cpu().numpy())
-            print(f"Sample range {start_pos}, {end_pos}")
+            #print(f"Sample range {start_pos}, {end_pos}")
 
             for i in range(input_ids.size(0)):
-                pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos.item():end_pos.item()+1])
+                pred_answer = dataset.tokenizer.decode(input_ids[i, start_logits[i]:end_logits[i]])
                 true_answer = dataset.answers[i]
                 print("-----TEST-----")
                 print(f"Sample {i+1}:")
