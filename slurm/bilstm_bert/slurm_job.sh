@@ -8,4 +8,5 @@
 #SBATCH --partition=medium
 #SBATCH -o cs4248_g14.out
 
+chmod +x bilstm.sh
 srun bilstm.sh

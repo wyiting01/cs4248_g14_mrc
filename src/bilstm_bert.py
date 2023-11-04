@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from sklearn.model_selection import RepeatedKFold
+from sklearn.model_selection import KFold
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
@@ -20,7 +20,7 @@ pip install torch
 pip install -U scikit-learn
 pip install transformers
 
-To run, use command: python3 src/bilstm_bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt
+To run, use command: python3 src/bilstm_bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path bilstm.pt
 '''
 
 # Default hyperparameters
@@ -33,7 +33,7 @@ learning_rate=5e-5
 num_epoch=10
 dropout_rate=0.1
 seed = 0
-num_splits = 5
+num_splits = 2
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -191,9 +191,11 @@ def collate_fn(batch):
 
 def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epochs, device, model_path):
     # Perform Stratified K-Folds cross-validations.
-    kfold = RepeatedKFold(n_splits=num_splits, random_state=seed)
+    kfold = KFold(n_splits=num_splits)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+
+    start = datetime.datetime.now()
 
     avg_losses_f = []
     avg_val_losses_f = []
@@ -273,6 +275,8 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
         avg_losses_f.append(avg_loss)
         avg_val_losses_f.append(avg_val_loss)
+
+    end = datetime.datetime.now()
 
     print('All \t loss={:.4f} \t val_loss={:.4f} \t '.format(np.average(avg_losses_f),np.average(avg_val_losses_f)))
 
@@ -368,14 +372,14 @@ def test(model, dataset, device='cpu'):
             start_logits, end_logits = model(input_ids, attention_mask)
 
             # Getting the most likely start and end positions
-            start_pos = torch.argmax(start_logits, dim=1)
-            end_pos = torch.argmax(end_logits, dim=1)
+            start_pos = torch.argmax(start_logits, dim=0)
+            end_pos = torch.argmax(end_logits, dim=0)
             
             # total_start_pos.extend(start_pos.cpu().numpy())
             # total_end_pos.extend(end_pos.cpu().numpy())
 
             for i in range(input_ids.size(0)):
-                pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
+                pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos.item():end_pos.item()+1])
                 true_answer = dataset.answers[i]
                 print("-----TEST-----")
                 print(f"Sample {i+1}:")
@@ -475,7 +479,7 @@ def main(args):
     
     split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path)
     #train_set = biLSTMDataset(train_path)
-    #test_set = biLSTMDataset(test_path)
+    test_set = biLSTMDataset(test_path)
 
     #train(model, train_set, num_epoch=10, batch_size=16, device=device)
     
