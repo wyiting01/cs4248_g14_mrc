@@ -512,3 +512,115 @@ def get_answer(example, features, all_results, n_best_size,
                "document" : example.doc_tokens
              }
     return answer
+
+def get_full_answer(example, features, all_results, n_best_size,
+                max_answer_length, do_lower_case):
+    example_index_to_features = collections.defaultdict(list)
+    for feature in features:
+        example_index_to_features[feature.example_index].append(feature)
+    
+    unique_id_to_result = {}
+    for result in all_results:
+        unique_id_to_result[result.unique_id] = result
+    _PrelimPrediction = collections.namedtuple( "PrelimPrediction",["feature_index", "start_index", "end_index", "start_logit", "end_logit"])
+
+    example_index = 0
+    features = example_index_to_features[example_index]
+
+    prelim_predictions = []
+
+    for (feature_index, feature) in enumerate(features):
+        result = unique_id_to_result[feature.unique_id]
+        start_indexes = _get_best_indexes(result.start_logits, n_best_size)
+        end_indexes = _get_best_indexes(result.end_logits, n_best_size)
+        for start_index in start_indexes:
+            for end_index in end_indexes:
+                # We could hypothetically create invalid predictions, e.g., predict
+                # that the start of the span is in the question. We throw out all
+                # invalid predictions.
+                if start_index >= len(feature.tokens):
+                    continue
+                if end_index >= len(feature.tokens):
+                    continue
+                if start_index not in feature.token_to_orig_map:
+                    continue
+                if end_index not in feature.token_to_orig_map:
+                    continue
+                if not feature.token_is_max_context.get(start_index, False):
+                    continue
+                if end_index < start_index:
+                    continue
+                length = end_index - start_index + 1
+                if length > max_answer_length:
+                    continue
+                prelim_predictions.append(
+                    _PrelimPrediction(
+                        feature_index=feature_index,
+                        start_index=start_index,
+                        end_index=end_index,
+                        start_logit=result.start_logits[start_index],
+                        end_logit=result.end_logits[end_index]))
+    prelim_predictions = sorted(prelim_predictions,key=lambda x: (x.start_logit + x.end_logit),reverse=True)
+    _NbestPrediction = collections.namedtuple("NbestPrediction",
+                        ["text", "start_logit", "end_logit","start_index","end_index"])
+    seen_predictions = {}
+    nbest = []
+    for pred in prelim_predictions:
+        feature = features[pred.feature_index]
+        orig_doc_start = -1
+        orig_doc_end = -1
+        if pred.start_index > 0:  # this is a non-null prediction
+            tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]
+            orig_doc_start = feature.token_to_orig_map[pred.start_index]
+            orig_doc_end = feature.token_to_orig_map[pred.end_index]
+            orig_tokens = example.doc_tokens[orig_doc_start:(orig_doc_end + 1)]
+            tok_text = " ".join(tok_tokens)
+
+            # De-tokenize WordPieces that have been split off.
+            tok_text = tok_text.replace(" ##", "")
+            tok_text = tok_text.replace("##", "")
+
+            # Clean whitespace
+            tok_text = tok_text.strip()
+            tok_text = " ".join(tok_text.split())
+            orig_text = " ".join(orig_tokens)
+
+            final_text = get_final_text(tok_text, orig_text,do_lower_case)
+            if final_text in seen_predictions:
+                continue
+
+            seen_predictions[final_text] = True
+        else:
+            final_text = ""
+            seen_predictions[final_text] = True
+
+        nbest.append(
+            _NbestPrediction(
+                text=final_text,
+                start_logit=pred.start_logit,
+                end_logit=pred.end_logit,
+                start_index=orig_doc_start,
+                end_index=orig_doc_end))
+
+    if not nbest:
+        nbest.append(_NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0,start_index=-1,
+                end_index=-1))
+
+    assert len(nbest) >= 1
+
+    total_scores = []
+    for entry in nbest:
+        total_scores.append(entry.start_logit + entry.end_logit)
+
+    probs = _compute_softmax(total_scores)
+
+    answer = {}
+
+    for i in range(len(probs)):
+        answer[i] = {"answer" : nbest[i].text,
+               "start" : nbest[i].start_index,
+               "end" : nbest[i].end_index,
+               "confidence" : probs[i],
+               "document" : example.doc_tokens
+             }
+    return answer
