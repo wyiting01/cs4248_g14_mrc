@@ -43,7 +43,7 @@ def main():
     bert = QA('model')
 
     for i in range(len(questions)):
-        # print(i)
+        print(i)
         curr_ans = bert.predict_full(contexts[i], questions[i])
         answers[qid[i]] = {}
         for j in range(len(curr_ans)):
