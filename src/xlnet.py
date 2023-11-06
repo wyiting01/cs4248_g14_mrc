@@ -304,7 +304,7 @@ def main(args):
     if args.test:
         test_path, model_path, output_path = args.data_path, args.model_path, args.output_path
         print("Loading Saved Weights from Training")
-        checkpoint = torch.load(model_path)
+        checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
         model.load_state_dict(checkpoint["model_state_dict"])
         squad_test = SquadDataset(test_path)
 
