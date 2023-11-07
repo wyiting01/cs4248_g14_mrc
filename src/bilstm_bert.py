@@ -131,7 +131,10 @@ class biLSTMDataset(Dataset):
                 end_char_pos -= 2
 
             # To find start and end of context
-            token_start_index = sequence_ids.tolist().index(0)
+            # token_start_index = sequence_ids.tolist().index(0)
+            token_start_index = 0
+            while sequence_ids[token_start_index] != 1:
+                token_start_index += 1
 
             token_end_index = len(input_ids) - 1
             # sequence_ids will be None for [PAD]
