@@ -34,7 +34,7 @@ num_layers=2
 num_labels=10
 batch_size=10
 learning_rate=5e-5
-num_epoch=10
+num_epoch=5
 dropout_rate=0.1
 seed = 0
 num_splits = 2
@@ -181,13 +181,15 @@ class biLSTMDataset(Dataset):
     
     def __getitem__(self, i):
         idx_i = self.sample_mapping[i]
+
         item = {
             "input_ids": self.encodings["input_ids"][i],
             "attention_mask": self.encodings["attention_mask"][i],
             "start_position": self.start_positions[i],
             "end_position": self.end_positions[i],
-            "question_ids": self.question_ids[i],
-            "contexts": self.contexts[idx_i]
+            "question_ids": self.question_ids[idx_i],
+            "contexts": self.contexts[idx_i],
+            "offset_mappings": self.offset_mapping[i]
         }
         return item
 
@@ -212,15 +214,16 @@ class BERT_BiLSTM(nn.Module):
 
         lstm_out, _ = self.lstm(bert_outputs['last_hidden_state'])
 
-        max_pooled = F.adaptive_max_pool1d(lstm_out.permute(0, 2, 1), 1).squeeze(-1)
+        # max_pooled = F.adaptive_max_pool1d(lstm_out.permute(0, 2, 1), 1).squeeze(-1)
 
         #ll = self.start_out(max_pooled)
-        relu = self.relu(max_pooled)
+        relu = self.relu(lstm_out)
         dropout_out = self.dropout(relu)
 
         #logits = torch.flatten(logits)
         start_logits = torch.abs(self.start_out(dropout_out)).squeeze(-1)
         end_logits = torch.abs(self.end_out(dropout_out)).squeeze(-1)
+        
         return start_logits, end_logits
 
 # train
@@ -230,15 +233,25 @@ def collate_fn(batch):
     attention_masks = [item["attention_mask"] for item in batch]
     start_positions = [item["start_position"] for item in batch]
     end_positions = [item["end_position"] for item in batch]
+    question_ids = [item["question_ids"] for item in batch]
+    contexts = [item["contexts"] for item in batch]
+    offset_mappings = [item["offset_mappings"] for item in batch]
 
     input_ids = pad_sequence(input_ids, batch_first=True)
     attention_masks = pad_sequence(attention_masks, batch_first=True)
+    
+    # max_len = max(len(ids) for ids in input_ids)
+    # padded_offset_mappings = [mapping + [(0, 0)] * (max_len - len(mapping)) for mapping in offset_mappings]
+    padded_offset_mappings = pad_sequence(offset_mappings, batch_first=True, padding_value=0)
 
     return {
         "input_ids": input_ids,
         "attention_mask": attention_masks,
-        "start_positions": torch.tensor(start_positions),
-        "end_positions": torch.tensor(end_positions)
+        "start_positions": torch.tensor(start_positions).clone().detach(),
+        "end_positions": torch.tensor(end_positions).clone().detach(),
+        "offset_mappings": torch.tensor(padded_offset_mappings).clone().detach(),
+        "question_ids": question_ids,
+        "contexts": contexts
     }
 
 def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epochs, device, model_path, test_set):
@@ -279,29 +292,20 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
             
-                start_positions = batch["start_positions"].to(device)
-                end_positions = batch["end_positions"].to(device)
+                start_positions = batch["start_positions"].to(device).long()
+                end_positions = batch["end_positions"].to(device).long()
 
                 optimizer.zero_grad()
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
-                print(start_logits)
-
-                currLens = train_set.getLengths(step, batch_size).to(device)
-
-                start_logits = start_logits * currLens
                 print("Start log:", start_logits)
-
                 print("Start pos:", start_positions)
-
-                end_logits = end_logits * currLens
                 print("End log:", end_logits)
-
                 print("End pos:", end_positions)
 
-                start_loss = criterion(start_logits, start_positions.to(torch.float))
-                end_loss = criterion(end_logits, end_positions.to(torch.float))
+                start_loss = criterion(start_logits, start_positions)
+                end_loss = criterion(end_logits, end_positions)
                 loss = (start_loss + end_loss) / 2
 
                 loss.backward()
@@ -313,7 +317,8 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 if step % 100 == 99:
                     print('[%d, %5d] loss: %.3f' %
                         (epoch + 1, step + 1, loss / 100))
-
+            
+            ########## TEST ALR ##########
             model.eval()
 
             avg_val_loss = 0
@@ -322,15 +327,15 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
             
-                start_positions = batch["start_positions"].to(device)
-                end_positions = batch["end_positions"].to(device)
+                start_positions = batch["start_positions"].to(device).long()
+                end_positions = batch["end_positions"].to(device).long()
 
                 optimizer.zero_grad()
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
-                start_loss = criterion(start_logits, start_positions.to(torch.float))
-                end_loss = criterion(end_logits, end_positions.to(torch.float))
+                start_loss = criterion(start_logits, start_positions)
+                end_loss = criterion(end_logits, end_positions)
                 loss = (start_loss + end_loss) / 2
 
                 avg_val_loss += loss.item() / len(valid_loader)
@@ -347,21 +352,25 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
         pred = {}
         scores = {}
-
+        
+        print("Conducting final test...")
         for i, batch in enumerate(test_loader):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             start_positions = batch["start_positions"].to(device)
             end_positions = batch["end_positions"].to(device)
-            question_ids = batch["question_ids"].to(device)
-            contexts = batch["contexts"].to(device)
-            offset_mappings = batch.get("offset_mapping")
+            
+            question_ids = batch["question_ids"]
+            contexts = batch["contexts"]
+            offset_mappings = batch["offset_mappings"]
             
             start_logits, end_logits = model(input_ids, attention_mask)
 
             start_logits = start_logits.cpu().detach().numpy() #grad included
             end_logits = end_logits.cpu().detach().numpy()
-            
+            print("Shape of start_logits:", start_logits.shape)
+            print("Shape of end_logits:", end_logits.shape)
+
             for i in range(len(input_ids)):
                 qid = question_ids[i]
                 ctxt = contexts[i]
@@ -382,6 +391,7 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                             })
 
                 answers = sorted(answers, key=lambda x: x["score"], reverse=True)
+
                 # save n best answers
                 answers = answers[:n_best_size]
 
@@ -389,15 +399,18 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 if len(answers) > 0:
                     pred[qid] = answers[0]["text"]
                     # Save all n_best_size answers' scores
-                    scores[qid] = [{"start_logit": start_logit[start_index], "end_logit": end_logit[end_index]}
-                                   for start_index, end_index in [(ans["start_index"], ans["end_index"]) for ans in answers]]
+                    scores[qid] = [{"start_logit": start_logits[i][ans["start_index"]], "end_logit": end_logits[i][ans["end_index"]]} for ans in answers]
+                    print(f"Question ID: {qid}")
+                    print(f"Context: {ctxt}")
+                    print(f"Predicted Answer: {answers[0]['text']}")
                 else:
                     pred[qid] = ""
                     scores[qid] = []
-
-        print(pred)
-        print(scores)
-
+                
+                print(f"Top {n_best_size} predicted answers for Question ID {qid}:")
+                for ans in answers:
+                    print(f"Score: {ans['score']:.4f}, Text: {ans['text']}")
+                
     end = datetime.datetime.now()
 
     print('All \t loss={:.4f} \t val_loss={:.4f} \t '.format(np.average(avg_losses_f),np.average(avg_val_losses_f)))
@@ -413,6 +426,7 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
     print('Model saved in ', model_path)
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
+    return pred, scores
 
 # test
 def get_f1(p, t):
@@ -611,14 +625,14 @@ def main(args):
     #test_outputs = test(model, dataset=test_set, device=device)
     #print(test_outputs)
 
-    # model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
+    model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
 
-    # x_train, y_train = extractAndMergeData(train_path)
+    x_train, y_train = extractAndMergeData(train_path)
 
-    # test_set = biLSTMDataset(test_path)
+    test_set = biLSTMDataset(test_path)
 
-    # split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
-    train_set = biLSTMDataset(train_path)
+    test_outputs, test_scores = split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
+    # train_set = biLSTMDataset(train_path)
 
     #train(model, train_set, num_epoch=10, batch_size=16, device=device)
     
@@ -626,7 +640,10 @@ def main(args):
     #print(test_outputs)
     # test_outputs, test_scores = test(model, dataset=test_set, device=device)
 
-    # json.dump(test_outputs, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
+    json.dump(test_outputs, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
+    json.dump(test_scores, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
+    print('\nSuccessful json dump!')
+
     # test_outputs = test(model, dataset=test_set, device=device)
 
     ## Checking outputs
