@@ -38,7 +38,8 @@ num_epoch=10
 dropout_rate=0.1
 seed = 0
 num_splits = 2
-n_best_size=20
+max_length = 0
+n_best_size= 20
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -76,11 +77,21 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        self.contexts = self.contexts
-        self.questions = self.questions
-        self.answers = self.answers
-        self.spans = self.spans
-        self.question_ids = self.question_ids
+        self.contexts = self.contexts[:5]
+        self.questions = self.questions[:5]
+        self.answers = self.answers[:5]
+        self.spans = self.spans[:5]
+        self.question_ids = self.question_ids[:5]
+
+        # temp_zip = zip(self.contexts, self.questions)
+        # max_length = max([len(zipped) for zipped in temp_zip])
+
+        # if max_length % 3 != 0:
+        #     if max_length % 2 != 0:
+        #         max_length += 1
+        #     stride = max_length / 2
+        # else:
+        #     stride = max_length / 3
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
@@ -120,9 +131,7 @@ class biLSTMDataset(Dataset):
                 end_char_pos -= 2
 
             # To find start and end of context
-            token_start_index = 0
-            while sequence_ids[token_start_index] != 1:
-                token_start_index += 1
+            token_start_index = sequence_ids.tolist().index(0)
 
             token_end_index = len(input_ids) - 1
             # sequence_ids will be None for [PAD]
@@ -131,6 +140,15 @@ class biLSTMDataset(Dataset):
             # skip over the [SEP]
             if token_end_index >= 0 and input_ids[token_end_index] == self.tokenizer.sep_token_id:
                 token_end_index -= 1
+
+            # token_start_index = sequence_ids.index(0)
+
+            # token_end_index = len(sequence_ids) - 1 - sequence_ids[::-1].index(0)
+
+            # if context[start_char_pos:end_char_pos] == answer:
+            #     self.start_positions.append(start_char_pos)
+            #     self.end_positions.append(end_char_pos)
+            #     continue
 
             # To find answers that are out of the span
             if not (offsets[token_start_index][0] <= start_char_pos and offsets[token_end_index][1] >= end_char_pos):
@@ -184,7 +202,7 @@ class BERT_BiLSTM(nn.Module):
         self.start_out = nn.Linear(hidden_dim * 2, 1)
         self.end_out = nn.Linear(hidden_dim * 2, 1)
         self.dropout = nn.Dropout(dropout_rate)
-        #self.relu = nn.ReLU()
+        self.relu = nn.ReLU()
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
@@ -193,11 +211,13 @@ class BERT_BiLSTM(nn.Module):
 
         max_pooled = F.adaptive_max_pool1d(lstm_out.permute(0, 2, 1), 1).squeeze(-1)
 
-        #relu_out = self.relu(max_pooled)
-        dropout_out = self.dropout(max_pooled)
+        #ll = self.start_out(max_pooled)
+        relu = self.relu(max_pooled)
+        dropout_out = self.dropout(relu)
 
-        start_logits = self.start_out(dropout_out).squeeze(-1)
-        end_logits = self.end_out(dropout_out).squeeze(-1)
+        #logits = torch.flatten(logits)
+        start_logits = torch.abs(self.start_out(dropout_out)).squeeze(-1)
+        end_logits = torch.abs(self.end_out(dropout_out)).squeeze(-1)
         return start_logits, end_logits
 
 # train
@@ -249,8 +269,6 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
         
         print(f'Fold {i + 1}')
 
-        start_time = datetime.datetime.now()
-
         for epoch in range(num_epochs):
             model.train()
             avg_loss = 0.0
@@ -265,10 +283,19 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
-                if (i == 1 and step == 1):
-                    print(f"Start: {start_positions} End: {end_positions}")
-                    print(f"Start logits {start_logits}")
-                    print(f"End logits {end_logits}")
+                print(start_logits)
+
+                currLens = train_set.getLengths(step, batch_size).to(device)
+
+                start_logits = start_logits * currLens
+                print("Start log:", start_logits)
+
+                print("Start pos:", start_positions)
+
+                end_logits = end_logits * currLens
+                print("End log:", end_logits)
+
+                print("End pos:", end_positions)
 
                 start_loss = criterion(start_logits, start_positions.to(torch.float))
                 end_loss = criterion(end_logits, end_positions.to(torch.float))
@@ -315,45 +342,58 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
         total_f1 = 0
         total_em = 0
 
+        pred = {}
+        scores = {}
+
         for i, batch in enumerate(test_loader):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
+            start_positions = batch["start_positions"].to(device)
+            end_positions = batch["end_positions"].to(device)
+            question_ids = batch["question_ids"].to(device)
+            contexts = batch["contexts"].to(device)
+            offset_mappings = batch.get("offset_mapping")
             
             start_logits, end_logits = model(input_ids, attention_mask)
 
-            # Getting the most likely start and end positions
-            # start_pos = torch.argmax(start_logits, dim=0)
-            # end_pos = torch.argmax(end_logits, dim=0)
+            start_logits = start_logits.cpu().detach().numpy() #grad included
+            end_logits = end_logits.cpu().detach().numpy()
             
-            # total_start_pos.extend(start_pos.cpu().numpy())
-            # total_end_pos.extend(end_pos.cpu().numpy())
-            #print(f"Sample range {start_pos}, {end_pos}")
+            for i in range(len(input_ids)):
+                qid = question_ids[i]
+                ctxt = contexts[i]
+                start_logit = start_logits[i]
+                end_logit = end_logits[i]
+                offset_mapping = offset_mappings[i]
+                answers = []
 
-            for i in range(input_ids.size(0)):
-                #pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
-                #pred_answer = test_set.tokenizer.decode(input_ids[i, round(abs(start_logits[i] * len(input_ids[i]))) : round(abs((end_logits[i] + 1) * len(input_ids[i])))])
-                start = round(abs(start_logits[i].item()) * len(test_set.contexts[i]))
-                end = round(abs(end_logits[i].item()) * len(test_set.contexts[i])) + 1
+                for start_index in range(len(start_logit)):
+                    for end_index in range(start_index, len(end_logit)):
+                        if start_index <= end_index: # for each valid span
+                            score = start_logit[start_index] + end_logit[end_index]
+                            start_char = offset_mapping[start_index][0]
+                            end_char = offset_mapping[end_index][1]
+                            answers.append({
+                                "score": score,
+                                "text": ctxt[start_char:end_char]
+                            })
 
-                # If start > end, nothing is printed.
+                answers = sorted(answers, key=lambda x: x["score"], reverse=True)
+                # save n best answers
+                answers = answers[:n_best_size]
 
-                pred_answer = " ".join(test_set.contexts[i].split()[start: end])    
-                true_answer = test_set.answers[i]
-                print("-----TEST-----")
-                print(f"Sample {i+1}:")
-                print("Predicted Answer:", pred_answer)
-                print("True Answer:", true_answer)
-                if pred_answer == true_answer:
-                    total_em += 1
-                total_f1 += get_f1(pred_answer, true_answer)
+                # output only the top answer
+                if len(answers) > 0:
+                    pred[qid] = answers[0]["text"]
+                    # Save all n_best_size answers' scores
+                    scores[qid] = [{"start_logit": start_logit[start_index], "end_logit": end_logit[end_index]}
+                                   for start_index, end_index in [(ans["start_index"], ans["end_index"]) for ans in answers]]
+                else:
+                    pred[qid] = ""
+                    scores[qid] = []
 
-
-        print(total_em)
-        n = len(test_set)
-        avg_f1 = total_f1/n
-        avg_em = total_em/n
-
-        print(-(0.5 * avg_f1 + 0.5 * avg_em))
+        print(pred)
+        print(scores)
 
     end = datetime.datetime.now()
 
@@ -371,53 +411,6 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
     print('Model saved in ', model_path)
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
 
-def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
-
-    start = datetime.datetime.now()
-    for epoch in range(num_epoch):
-        model.train()
-        total_loss = 0
-        for batch in data_loader:
-            optimizer.zero_grad()
-            
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            
-            start_positions = batch["start_positions"].to(device)
-            end_positions = batch["end_positions"].to(device)
-            
-            # Forward pass
-            start_logits, end_logits = model(input_ids, attention_mask)
-
-            # Compute loss and backpropagate
-            start_loss = criterion(start_logits, start_positions.to(torch.float))
-            end_loss = criterion(end_logits, end_positions.to(torch.float))
-            loss = (start_loss + end_loss) / 2
-
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item()
-
-            print(f"Epoch {epoch+1}/{num_epoch}, Loss: {total_loss/len(data_loader)}")
-    end = datetime.datetime.now()
-
-    checkpoint = {
-        'epoch': num_epoch,
-        'lr': learning_rate,
-        'batch_size': batch_size,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict()
-    }
-    torch.save(checkpoint, model_path)
-
-    print('Model saved in ', model_path)
-    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
-    return {'loss': total_loss/len(data_loader), 'status': STATUS_OK}
-
 # test
 def get_f1(p, t):
     p_tokens = p.split() # predicted
@@ -432,52 +425,64 @@ def get_f1(p, t):
     f1 = 2 * (precision * recall) / (precision + recall)
     return f1
 
-def test(model, dataset, device='cpu'):
+## test based on scores
+def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
     model.eval()
     test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
-    
-    # total_start_pos = []
-    # total_end_pos = []
+    pred = {}
+    scores = {}
 
-    total_f1 = 0
-    total_em = 0
-
+    print("Final testing on Test Dataset...")
     with torch.no_grad():
         for batch in test_loader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
+            start_positions = batch["start_positions"].to(device)
+            end_positions = batch["end_positions"].to(device)
+            question_ids = batch["question_ids"].to(device)
+            contexts = batch["contexts"].to(device)
+            offset_mappings = batch.get("offset_mapping")
             
             start_logits, end_logits = model(input_ids, attention_mask)
 
-            print(f"Sample logits {start_logits}, {end_logits}")
-
-            # Getting the most likely start and end positions
-            #start_pos = torch.argmax(start_logits, dim=0)
-            #end_pos = torch.argmax(end_logits, dim=0)
+            start_logits = start_logits.cpu().detach().numpy() #grad included
+            end_logits = end_logits.cpu().detach().numpy()
             
-            # total_start_pos.extend(start_pos.cpu().numpy())
-            # total_end_pos.extend(end_pos.cpu().numpy())
-            #print(f"Sample range {start_pos}, {end_pos}")
+            for i in range(len(input_ids)):
+                qid = question_ids[i]
+                ctxt = contexts[i]
+                start_logit = start_logits[i]
+                end_logit = end_logits[i]
+                offset_mapping = offset_mappings[i]
+                answers = []
 
-            for i in range(input_ids.size(0)):
-                pred_answer = dataset.tokenizer.decode(input_ids[i, start_logits[i]:end_logits[i]])
-                true_answer = dataset.answers[i]
-                print("-----TEST-----")
-                print(f"Sample {i+1}:")
-                print("Predicted Answer:", pred_answer)
-                print("True Answer:", true_answer)
-                if pred_answer == true_answer:
-                    total_em += 1
-                total_f1 += get_f1(pred_answer, true_answer)
-    print(total_em)
-    n = len(dataset)
-    avg_f1 = total_f1/n
-    avg_em = total_em/n
+                for start_index in range(len(start_logit)):
+                    for end_index in range(start_index, len(end_logit)):
+                        if start_index <= end_index: # for each valid span
+                            score = start_logit[start_index] + end_logit[end_index]
+                            start_char = offset_mapping[start_index][0]
+                            end_char = offset_mapping[end_index][1]
+                            answers.append({
+                                "score": score,
+                                "text": ctxt[start_char:end_char]
+                            })
 
-    # return total_start_pos, total_end_pos
-    # TODO: check which metric to use, and if weighted average is a 
-    # return avg_f1, avg_em 
-    return -(0.5 * avg_f1 + 0.5 * avg_em)
+                answers = sorted(answers, key=lambda x: x["score"], reverse=True)
+                # save n best answers
+                answers = answers[:n_best_size]
+
+                # output only the top answer
+                if len(answers) > 0:
+                    pred[qid] = answers[0]["text"]
+                    # Save all n_best_size answers' scores
+                    scores[qid] = [{"start_logit": start_logit[start_index], "end_logit": end_logit[end_index]}
+                                   for start_index, end_index in [(ans["start_index"], ans["end_index"]) for ans in answers]]
+                else:
+                    pred[qid] = ""
+                    scores[qid] = []
+                
+    print("Final testing completed. Best answers computed.")
+    return pred, scores
 
 ## test based on scores
 def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
@@ -644,3 +649,98 @@ def get_arguments():
 if __name__ == "__main__":
     args = get_arguments()
     main(args)
+
+
+# def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
+#     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+#     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+#     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+
+#     start = datetime.datetime.now()
+#     for epoch in range(num_epoch):
+#         model.train()
+#         total_loss = 0
+#         for batch in data_loader:
+#             optimizer.zero_grad()
+            
+#             input_ids = batch["input_ids"].to(device)
+#             attention_mask = batch["attention_mask"].to(device)
+            
+#             start_positions = batch["start_positions"].to(device)
+#             end_positions = batch["end_positions"].to(device)
+            
+#             # Forward pass
+#             start_logits, end_logits = model(input_ids, attention_mask)
+
+#             # Compute loss and backpropagate
+#             start_loss = criterion(start_logits, start_positions)
+#             end_loss = criterion(end_logits, end_positions)
+#             loss = (start_loss + end_loss) / 2
+
+#             loss.backward()
+#             optimizer.step()
+
+#             total_loss += loss.item()
+
+#             print(f"Epoch {epoch+1}/{num_epoch}, Loss: {total_loss/len(data_loader)}")
+#     end = datetime.datetime.now()
+
+#     checkpoint = {
+#         'epoch': num_epoch,
+#         'lr': learning_rate,
+#         'batch_size': batch_size,
+#         'model_state_dict': model.state_dict(),
+#         'optimizer_state_dict': optimizer.state_dict()
+#     }
+#     torch.save(checkpoint, model_path)
+
+#     print('Model saved in ', model_path)
+#     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
+#     return {'loss': total_loss/len(data_loader), 'status': STATUS_OK}
+
+# def test(model, dataset, device='cpu'):
+#     model.eval()
+#     test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
+    
+#     # total_start_pos = []
+#     # total_end_pos = []
+
+#     total_f1 = 0
+#     total_em = 0
+
+#     with torch.no_grad():
+#         for batch in test_loader:
+#             input_ids = batch["input_ids"].to(device)
+#             attention_mask = batch["attention_mask"].to(device)
+            
+#             start_logits, end_logits = model(input_ids, attention_mask)
+
+#             print(f"Sample logits {start_logits}, {end_logits}")
+
+#             # Getting the most likely start and end positions
+#             #start_pos = torch.argmax(start_logits, dim=0)
+#             #end_pos = torch.argmax(end_logits, dim=0)
+            
+#             # total_start_pos.extend(start_pos.cpu().numpy())
+#             # total_end_pos.extend(end_pos.cpu().numpy())
+#             #print(f"Sample range {start_pos}, {end_pos}")
+
+#             for i in range(input_ids.size(0)):
+#                 pred_answer = dataset.tokenizer.decode(input_ids[i, start_logits[i]:end_logits[i]])
+#                 true_answer = dataset.answers[i]
+#                 print("-----TEST-----")
+#                 print(f"Sample {i+1}:")
+#                 print("Predicted Answer:", pred_answer)
+#                 print("True Answer:", true_answer)
+#                 if pred_answer == true_answer:
+#                     total_em += 1
+#                 total_f1 += get_f1(pred_answer, true_answer)
+#     print(total_em)
+#     n = len(dataset)
+#     avg_f1 = total_f1/n
+#     avg_em = total_em/n
+
+#     # return total_start_pos, total_end_pos
+#     # TODO: check which metric to use, and if weighted average is a 
+#     # return avg_f1, avg_em 
+#     return -(0.5 * avg_f1 + 0.5 * avg_em)
