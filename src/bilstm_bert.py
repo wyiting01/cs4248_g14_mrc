@@ -1,13 +1,14 @@
 import argparse
 import datetime
 from itertools import islice
+from itertools import islice
 import numpy as np
 import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from sklearn.model_selection import RepeatedKFold
+from sklearn.model_selection import KFold
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
@@ -18,15 +19,16 @@ import tensorflow as tf
 Need to install libraries for numpy, sklearn, transformers:
 
 pip install numpy
+pip install torch
 pip install -U scikit-learn
 pip install transformers
 
-To run, use command: python3 src/bilstm_bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt
+To run, use command: python3 src/bilstm-bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt
 '''
 
 # Default hyperparameters
 input_size=28
-hidden_dim=256
+hidden_dim=64
 num_layers=2
 num_labels=10
 batch_size=10
@@ -34,7 +36,7 @@ learning_rate=5e-5
 num_epoch=10
 dropout_rate=0.1
 seed = 0
-num_splits = 5
+num_splits = 2
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -59,17 +61,24 @@ class biLSTMDataset(Dataset):
             spans = read_content(f"{in_path}/answer_span")
             question_ids = read_content(f"{in_path}/question_id")
 
-            self.contexts = [ctx.strip() for ctx in contexts][:10]
-            self.questions = [qn.strip() for qn in questions][:10]
-            self.answers = [ans.strip() for ans in answers][:10]
-            self.spans = [span.strip().split() for span in spans][:10]
-            self.question_ids = [qn_id.strip() for qn_id in question_ids][:10]
+            self.contexts = [ctx.strip() for ctx in contexts]
+            self.questions = [qn.strip() for qn in questions]
+            self.answers = [ans.strip() for ans in answers]
+            self.spans = [span.strip().split() for span in spans]
+            self.question_ids = [qn_id.strip() for qn_id in question_ids]
         else:
             self.contexts, self.questions, self.question_ids = zip(*x)
             self.answers, self.spans = zip(*y)
             
             # Initially cannot split because of how k fold works.
             self.spans = [span.split() for span in self.spans]
+
+        # For debugging, something inherently wrong with current code.
+        self.contexts = self.contexts
+        self.questions = self.questions
+        self.answers = self.answers
+        self.spans = self.spans
+        self.question_ids = self.question_ids
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
@@ -144,24 +153,31 @@ class biLSTMDataset(Dataset):
         }
         return item
 
-class BERT_BiLSTM(nn.Module):
+class BERT_BiLSTM(nn.Module):   
     def __init__(self, input_size, hidden_dim, num_layers, num_labels):
         super(BERT_BiLSTM, self).__init__()
         self.hidden_dim = hidden_dim
+
+        # Currently unused params - removable (?)
         self.num_layers = num_layers
+        self.num_labels = num_labels
+        
         self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
         self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
         self.start_out = nn.Linear(hidden_dim * 2, 1)
         self.end_out = nn.Linear(hidden_dim * 2, 1)
         self.dropout = nn.Dropout(dropout_rate)
-        self.relu = nn.ReLU()
+        #self.relu = nn.ReLU()
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
+
         lstm_out, _ = self.lstm(bert_outputs['last_hidden_state'])
+
         max_pooled = F.adaptive_max_pool1d(lstm_out.permute(0, 2, 1), 1).squeeze(-1)
-        relu_out = self.relu(max_pooled)
-        dropout_out = self.dropout(relu_out)
+
+        #relu_out = self.relu(max_pooled)
+        dropout_out = self.dropout(max_pooled)
 
         start_logits = self.start_out(dropout_out).squeeze(-1)
         end_logits = self.end_out(dropout_out).squeeze(-1)
@@ -185,11 +201,18 @@ def collate_fn(batch):
         "end_positions": torch.tensor(end_positions)
     }
 
-def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epochs, device, model_path):
+def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epochs, device, model_path, test_set):
     # Perform Stratified K-Folds cross-validations.
-    kfold = RepeatedKFold(n_splits=num_splits, random_state=seed)
+    kfold = KFold(n_splits=num_splits)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+    start = datetime.datetime.now()
+
+    avg_losses_f = []
+    avg_val_losses_f = []
     print("Beginning folding")
 
     for i, (train_index, valid_index) in enumerate(kfold.split(x_train, y_train)):
@@ -204,8 +227,8 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
         train_set = biLSTMDataset(x=x_train_fold, y=y_train_fold)
         valid_set = biLSTMDataset(x=x_val_fold, y=y_val_fold)
 
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-        valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+        valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
         
         print(f'Fold {i + 1}')
 
@@ -225,6 +248,11 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
+                if (i == 1 and step == 1):
+                    print(f"Start: {start_positions} End: {end_positions}")
+                    print(f"Start logits {start_logits}")
+                    print(f"End logits {end_logits}")
+
                 start_loss = criterion(start_logits, start_positions.to(torch.float))
                 end_loss = criterion(end_logits, end_positions.to(torch.float))
                 loss = (start_loss + end_loss) / 2
@@ -233,16 +261,13 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 optimizer.step()
 
-                avg_loss = loss.item() / len(train_loader)
+                avg_loss += loss.item() / len(train_loader)
 
                 if step % 100 == 99:
                     print('[%d, %5d] loss: %.3f' %
                         (epoch + 1, step + 1, loss / 100))
 
             model.eval()
-
-            valid_preds_fold = np.zeros((x_val_fold.size(0)))
-            test_preds_fold = np.zeros((dataset.__len__()))
 
             avg_val_loss = 0
 
@@ -261,8 +286,7 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 end_loss = criterion(end_logits, end_positions.to(torch.float))
                 loss = (start_loss + end_loss) / 2
 
-                avg_loss = loss.item() / len(valid_loader)
-                valid_preds_fold[index] = sigmoid(y_pred.cpu().numpy())[:, 0]
+                avg_val_loss += loss.item() / len(valid_loader)
 
             if step % 100 == 99:
                 print('Epoch[%d, %5d] average loss: %.3f average validation loss: %.3f' %
@@ -273,6 +297,7 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
         test_outputs = test(model, dataset=test_dataset, device=device)
         print(test_outputs)
+
 
 def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
@@ -297,8 +322,7 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
 
             # Compute loss and backpropagate
             start_loss = criterion(start_logits, start_positions.to(torch.float))
-            end_loss = criterion(end_logits, end_positions.to(torch.float))
-            loss = (start_loss + end_loss) / 2
+            end_loss = criterion(end_logits, end_positions.to(torch.float))            loss = (start_loss + end_loss) / 2
 
             loss.backward()
             optimizer.step()
@@ -352,15 +376,18 @@ def test(model, dataset, device='cpu'):
             
             start_logits, end_logits = model(input_ids, attention_mask)
 
+            print(f"Sample logits {start_logits}, {end_logits}")
+
             # Getting the most likely start and end positions
-            start_pos = torch.argmax(start_logits, dim=1)
-            end_pos = torch.argmax(end_logits, dim=1)
+            #start_pos = torch.argmax(start_logits, dim=0)
+            #end_pos = torch.argmax(end_logits, dim=0)
             
             # total_start_pos.extend(start_pos.cpu().numpy())
             # total_end_pos.extend(end_pos.cpu().numpy())
+            #print(f"Sample range {start_pos}, {end_pos}")
 
             for i in range(input_ids.size(0)):
-                pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
+                pred_answer = dataset.tokenizer.decode(input_ids[i, start_logits[i]:end_logits[i]])
                 true_answer = dataset.answers[i]
                 print("-----TEST-----")
                 print(f"Sample {i+1}:")
@@ -505,26 +532,16 @@ def main(args):
 
     model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
 
-    # x_train, y_train = extractAndMergeData(train_path)
-    # print("Starting KFolds validation...")    
-    # split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path)
+    x_train, y_train = extractAndMergeData(train_path)
     
-    train_set = biLSTMDataset(train_path)
-    test_set = biLSTMDataset(test_path)
+    split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path)
+    #train_set = biLSTMDataset(train_path)
+    #test_set = biLSTMDataset(test_path)
 
-    train(model, train_set, num_epoch=10, batch_size=16, device=device)
-    test_outputs, test_scores = test(model, dataset=test_set, device=device)
-    # test_outputs = test(model, dataset=test_set, device=device)
-
-    ## Checking outputs
-    ## TODO: Remove ltr
-    trunc_outputs = list(islice(test_outputs.items(), 10))
-    trunc_scores = list(islice(test_scores.items(), 10))
-    # Print the first 10 items
-    for k, v in trunc_outputs:
-        print(f'{k}: {v}')
-    for key, value in trunc_scores:
-        print(f'{k}: {v}')
+    #train(model, train_set, num_epoch=10, batch_size=16, device=device)
+    
+    test_outputs = test(model, dataset=test_set, device=device)
+    print(test_outputs)
 
     print('\n==== All done ====')
 
