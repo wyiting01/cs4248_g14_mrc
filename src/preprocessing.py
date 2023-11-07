@@ -7,6 +7,7 @@ However, it was ultimately omitted from the final implementation because it did 
 To run the file in root directory, use the following commands
 python src/preprocessing.py --file_path "data/raw/train-v1.1.json" --train
 python src/preprocessing.py --file_path "data/raw/dev-v1.1.json" --test
+python src/preprocessing.py --file_path "data/raw/train-v1.1.json" --train_val
 """
 
 import argparse
