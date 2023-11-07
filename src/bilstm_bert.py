@@ -34,6 +34,7 @@ num_epoch=10
 dropout_rate=0.1
 seed = 0
 num_splits = 2
+max_length = 0
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -71,16 +72,26 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        self.contexts = self.contexts
-        self.questions = self.questions
-        self.answers = self.answers
-        self.spans = self.spans
-        self.question_ids = self.question_ids
+        self.contexts = self.contexts[:5]
+        self.questions = self.questions[:5]
+        self.answers = self.answers[:5]
+        self.spans = self.spans[:5]
+        self.question_ids = self.question_ids[:5]
+
+        temp_zip = zip(self.contexts, self.questions)
+        max_length = max([len(zipped) for zipped in temp_zip])
+
+        if max_length % 3 != 0:
+            if max_length % 2 != 0:
+                max_length += 1
+            stride = max_length / 2
+        else:
+            stride = max_length / 3
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
                                         padding="max_length",
-                                        max_length=384,
+                                        max_length=max_length,
                                         stride=128,
                                         return_tensors="pt",
                                         truncation="only_second",
@@ -104,7 +115,6 @@ class biLSTMDataset(Dataset):
             answer = self.answers[sample_index]
             start_char_pos, end_char_pos = map(int, self.spans[sample_index])
 
-            # To adjust answer spans that might be off by one or two characters
             if context[start_char_pos:end_char_pos] != answer and context[start_char_pos-1:end_char_pos-1] == answer:
                 start_char_pos -= 1
                 end_char_pos -= 1
@@ -113,13 +123,14 @@ class biLSTMDataset(Dataset):
                 end_char_pos -= 2
 
             # To find start and end of context
-            token_start_index = 0
-            while sequence_ids[token_start_index] != 1:
-                token_start_index += 1
+            token_start_index = sequence_ids.index(0)
 
-            token_end_index = len(input_ids) - 1
-            while sequence_ids[token_end_index] != 1:
-                token_end_index -= 1
+            token_end_index = len(sequence_ids) - 1 - sequence_ids[::-1].index(0)
+
+            if context[start_char_pos:end_char_pos] == answer:
+                self.start_positions.append(start_char_pos)
+                self.end_positions.append(end_char_pos)
+                continue
 
             # To find answers that are out of the span
             if not (offsets[token_start_index][0] <= start_char_pos and offsets[token_end_index][1] >= end_char_pos):
@@ -133,7 +144,17 @@ class biLSTMDataset(Dataset):
                 while offsets[token_end_index][1] >= end_char_pos:
                     token_end_index -= 1
                 self.end_positions.append(token_end_index + 1)
+
         print("Dataset initialisation complete.")
+    
+    # Return a tensor of lengths of contexts with batch_size and step specified.
+    def getLengths(self, step, batch_size):
+        newLen = []
+        for i in range(step * batch_size, step * batch_size + batch_size):
+            if i >= len(self.contexts):
+                break
+            newLen.append(len(self.contexts[i]))
+        return torch.tensor(newLen)
 
     def __len__(self):
         return len(self.contexts)
@@ -158,11 +179,11 @@ class BERT_BiLSTM(nn.Module):
         self.num_labels = num_labels
         
         self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
-        self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
+        self.lstm = nn.LSTM(input_size=max_length * 2, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
         self.start_out = nn.Linear(hidden_dim * 2, 1)
-        self.end_out = nn.Linear(hidden_dim * 2, 1)
+        #self.end_out = nn.Linear(hidden_dim * 2, 1)
         self.dropout = nn.Dropout(dropout_rate)
-        #self.relu = nn.ReLU()
+        self.relu = nn.ReLU()
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
@@ -171,12 +192,16 @@ class BERT_BiLSTM(nn.Module):
 
         max_pooled = F.adaptive_max_pool1d(lstm_out.permute(0, 2, 1), 1).squeeze(-1)
 
-        #relu_out = self.relu(max_pooled)
-        dropout_out = self.dropout(max_pooled)
+        ll = self.start_out(max_pooled)
 
-        start_logits = self.start_out(dropout_out).squeeze(-1)
-        end_logits = self.end_out(dropout_out).squeeze(-1)
-        return start_logits, end_logits
+        relu_out = self.relu(ll)
+        dropout_out = self.dropout(relu_out)
+
+        logits = torch.flatten(logits)
+
+        #end_logits = self.end_out(dropout_out).squeeze(-1)
+        end_logits = 1
+        return logits, end_logits
 
 # train
 # Pad to the right side
@@ -227,8 +252,6 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
         
         print(f'Fold {i + 1}')
 
-        start_time = datetime.datetime.now()
-
         for epoch in range(num_epochs):
             model.train()
             avg_loss = 0.0
@@ -243,10 +266,19 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
-                if (i == 1 and step == 1):
-                    print(f"Start: {start_positions} End: {end_positions}")
-                    print(f"Start logits {start_logits}")
-                    print(f"End logits {end_logits}")
+                print(start_logits)
+
+                currLens = train_set.getLengths(step, batch_size).to(device)
+
+                start_logits = start_logits * currLens
+                print("Start log:", start_logits)
+
+                print("Start pos:", start_positions)
+
+                end_logits = end_logits * currLens
+                print("End log:", end_logits)
+
+                print("End pos:", end_positions)
 
                 start_loss = criterion(start_logits, start_positions.to(torch.float))
                 end_loss = criterion(end_logits, end_positions.to(torch.float))
@@ -308,14 +340,14 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
             #print(f"Sample range {start_pos}, {end_pos}")
 
             for i in range(input_ids.size(0)):
-                #pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
+                #pred_answer = test_set.tokenizer.decode(input_ids[i, start_logits[i]:end_logits[i]+1])
                 #pred_answer = test_set.tokenizer.decode(input_ids[i, round(abs(start_logits[i] * len(input_ids[i]))) : round(abs((end_logits[i] + 1) * len(input_ids[i])))])
-                start = round(abs(start_logits[i].item()) * len(test_set.contexts[i]))
-                end = round(abs(end_logits[i].item()) * len(test_set.contexts[i])) + 1
+                start_idx = round(start_logits[i].item() * len(test_set.contexts[i]))
+                end_idx = round(end_logits[i].item() * len(test_set.contexts[i])) + 1
 
                 # If start > end, nothing is printed.
 
-                pred_answer = " ".join(test_set.contexts[i].split()[start: end])    
+                pred_answer = " ".join(test_set.contexts[i].split()[start_idx: end_idx])    
                 true_answer = test_set.answers[i]
                 print("-----TEST-----")
                 print(f"Sample {i+1}:")
@@ -325,8 +357,6 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                     total_em += 1
                 total_f1 += get_f1(pred_answer, true_answer)
 
-
-        print(total_em)
         n = len(test_set)
         avg_f1 = total_f1/n
         avg_em = total_em/n
