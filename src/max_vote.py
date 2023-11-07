@@ -8,6 +8,10 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
+import argparse
+import xlnet
+from bert.bert import QA
+from bert.utils import *
 
 torch.manual_seed(0)
 
@@ -156,78 +160,18 @@ class SquadDataset(Dataset):
 
         }
         return item_dict
+
+def predict(dataset, xlnet_model, n_best_size,device='cpu', max_answer_length = 30):
+    print("Beginning Prediction")
+    pred_data = DataLoader(dataset=dataset, batch_size=16, shuffle=False)
+    bert = QA('bert/model')
     
-def train(model, dataset, batch_size=16, learning_rate=5e-5, num_epoch=10, device='cpu', model_path=None):
-
-    print("Training XLNet Model")
-
-    data_loader = DataLoader(dataset, batch_size=batch_size)
-    optimizer = AdamW(model.parameters(), lr=learning_rate)
-
-    start = datetime.datetime.now()
-    for epoch in range(num_epoch):
-        model.train()
-
-        for step, batch in enumerate(data_loader, 0):
-            
-            # get the inputs; batch is a dict
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            start_positions = batch['start_positions'].to(device)
-            end_positions = batch['end_positions'].to(device)
-
-            # zero the parameter gradients
-            optimizer.zero_grad()
-
-            # do forward propagation
-            outputs = model(input_ids, attention_mask=attention_mask, start_positions=start_positions, end_positions=end_positions)
-
-            # calculate the loss
-            loss = outputs[0]
-
-            # do backward propagation
-            loss.backward()
-
-            # do the parameter optimization
-            optimizer.step()
-
-            # print loss value every 100 iterations and reset running loss
-            if step % 100 == 99:
-                print('[%d, %5d] loss: %.3f' %
-                    (epoch + 1, step + 1, loss / 100))
-
-    end = datetime.datetime.now()
-
-    # save trained model
-    checkpoint = {
-        'epoch': num_epoch,
-        'lr': learning_rate,
-        'batch_size': batch_size,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict()
-    }
-    torch.save(checkpoint, model_path)
-
-    print('Model saved in ', model_path)
-    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
-
-def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
-    model.eval()
-
-    test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
-
-    pred_all = {}
-    pred_top = {}
-
-    print("Making Predictions on Test Dataset")
     with torch.no_grad():
-        for data in test_dataloader:
+        for data in pred_data:
             input_ids = data["input_ids"].to(device)
             attention_mask = data["attention_mask"].to(device)
             start = data["start_positions"].to(device)
             end = data["end_positions"].to(device)
-            
-            output = model(input_ids=input_ids, attention_mask=attention_mask)
 
             offset_mapping = data["offset_mapping"]
             context = data["og_contexts"]
@@ -235,7 +179,15 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
             question = data["og_questions"]
             qids = data["og_question_ids"]
 
+            output = xlnet_model(input_ids=input_ids, attention_mask=attention_mask)
+
             for i in range(len(input_ids)):
+                print(question[i])
+                bert_pred = bert.predict(context[i], question[i])
+                print('Bert:')
+                print(bert_pred)
+
+                pred = {}
                 start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
                 end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
                 start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
@@ -248,7 +200,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 ctxt = context[i]
                 qid = qids[i]
 
-                valid_answers = {}
+                valid_answers = []
                 for start in start_indexes:
                     for end in end_indexes:
                         start_index = start_top_indexes[start]
@@ -269,69 +221,35 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                         if start_index <= end_index:
                             start_char = offsets[start_index][0]
                             end_char = offsets[end_index][1]
-                            pred_answer = ctxt[start_char: end_char] 
-                            pred_score = start_logits[start] + end_logits[end]
-                            if valid_answers.get(pred_answer) == None or float(valid_answers.get(pred_answer)) < pred_score:
-                                valid_answers[pred_answer] = str(pred_score)
+                            valid_answers.append(
+                                {
+                                    "score": start_logits[start] + end_logits[end],
+                                    "text": ctxt[start_char: end_char]
+                                }
+                            )
 
-                valid_answers = dict(sorted(valid_answers.items(), key=lambda x: float(x[1]), reverse=True)[:n_best_size])
+                valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
                 if len(valid_answers) == 0:
-                    pred_all[qid] = ""
-                    pred_top[qid] = {}
+                    pred[qid] = ""
                 else:
-                    pred_all[qid] = valid_answers
-                    pred_top[qid] = next(iter(valid_answers))
+                    pred[qid] = valid_answers[0]['text']
 
-    return pred_all, pred_top
+                print('XLNET:')
+                print(pred)
+                break
+            break
 
 def main(args):
-    
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    print("Initialising XLNet Model")
-    model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
-
-    if args.train:
-        train_path, model_path = args.data_path, args.model_path
-        squad_train = SquadDataset(train_path)
-
-        # specify hyperparameters
-        num_epoch = 2
-        batch_size = 16
-        learning_rate = 5e-5
-
-        # train the model
-        train(model=model, dataset=squad_train, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=model_path)
-    
-    if args.test:
-        test_path, model_path, output_path = args.data_path, args.model_path, args.output_path
-        print("Loading Saved Weights from Training")
-        checkpoint = torch.load(model_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        squad_test = SquadDataset(test_path)
-
-        # specify hyperparameters
-        n_best_size = 20
-        max_answer_length = 30
-
-        # use trained model to make predictions
-        pred_all, pred_top = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
-    
-        # write model prediction into json file
-        with open(output_path + "/xlnet_pred_all.json", 'w') as f:
-            json.dump(pred_all, f)
-
-        with open(output_path + "/xlnet_pred_top.json", 'w') as f:
-            json.dump(pred_top, f)
-
-        print('Model predictions saved in ', output_path)
-
+    data = SquadDataset(args.data_path)
+    model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
+    checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
+    model.load_state_dict(checkpoint["model_state_dict"])
+    ans = predict(data, model, 20)
+    return ans
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', default=False, action='store_true', help='train the model')
-    parser.add_argument('--test', default=False, action='store_true', help='test the model')
     parser.add_argument('--data_path', help='path to the dataset file')
-    parser.add_argument('--model_path', help='path to save trained model')
-    parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
+    parser.add_argument('--xlnet_model', help='path to xlnet model')
     return parser.parse_args()
 
 if __name__ == "__main__":

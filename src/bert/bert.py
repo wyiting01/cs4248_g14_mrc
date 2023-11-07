@@ -10,7 +10,7 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
                                   BertForQuestionAnswering, BertTokenizer)
 from torch.utils.data import DataLoader, SequentialSampler, TensorDataset
 
-from utils import (get_answer, input_to_squad_example,
+from .utils import (get_answer, input_to_squad_example,
                    squad_examples_to_features, to_list, get_full_answer)
 
 RawResult = collections.namedtuple("RawResult",
@@ -38,7 +38,6 @@ class QA:
 
     def load_model(self,model_path: str,do_lower_case=False):
         config = BertConfig.from_pretrained(model_path + "/bert_config.json")
-        print(config)
         tokenizer = BertTokenizer.from_pretrained(model_path, do_lower_case=do_lower_case)
         model = BertForQuestionAnswering.from_pretrained(model_path, from_tf=False, config=config)
         return model, tokenizer
