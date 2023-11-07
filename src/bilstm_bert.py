@@ -1,8 +1,9 @@
 import argparse
 import datetime
 from itertools import islice
-from itertools import islice
 import numpy as np
+import json
+import sys
 import random
 import torch
 import torch.nn as nn
@@ -23,7 +24,7 @@ pip install torch
 pip install -U scikit-learn
 pip install transformers
 
-To run, use command: python3 src/bilstm-bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt
+To run, use command: python3 src/bilstm_bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path bilstm.pt
 '''
 
 # Default hyperparameters
@@ -37,6 +38,7 @@ num_epoch=10
 dropout_rate=0.1
 seed = 0
 num_splits = 2
+n_best_size=20
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -61,11 +63,11 @@ class biLSTMDataset(Dataset):
             spans = read_content(f"{in_path}/answer_span")
             question_ids = read_content(f"{in_path}/question_id")
 
-            self.contexts = [ctx.strip() for ctx in contexts]
-            self.questions = [qn.strip() for qn in questions]
-            self.answers = [ans.strip() for ans in answers]
-            self.spans = [span.strip().split() for span in spans]
-            self.question_ids = [qn_id.strip() for qn_id in question_ids]
+            self.contexts = [ctx.strip() for ctx in contexts][:10]
+            self.questions = [qn.strip() for qn in questions][:10]
+            self.answers = [ans.strip() for ans in answers][:10]
+            self.spans = [span.strip().split() for span in spans][:10]
+            self.question_ids = [qn_id.strip() for qn_id in question_ids][:10]
         else:
             self.contexts, self.questions, self.question_ids = zip(*x)
             self.answers, self.spans = zip(*y)
@@ -295,9 +297,64 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
         avg_losses_f.append(avg_loss)
         avg_val_losses_f.append(avg_val_loss)
 
-        test_outputs = test(model, dataset=test_dataset, device=device)
-        print(test_outputs)
+        total_f1 = 0
+        total_em = 0
 
+        for i, batch in enumerate(test_loader):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            
+            start_logits, end_logits = model(input_ids, attention_mask)
+
+            # Getting the most likely start and end positions
+            # start_pos = torch.argmax(start_logits, dim=0)
+            # end_pos = torch.argmax(end_logits, dim=0)
+            
+            # total_start_pos.extend(start_pos.cpu().numpy())
+            # total_end_pos.extend(end_pos.cpu().numpy())
+            #print(f"Sample range {start_pos}, {end_pos}")
+
+            for i in range(input_ids.size(0)):
+                #pred_answer = dataset.tokenizer.decode(input_ids[i, start_pos[i]:end_pos[i]+1])
+                #pred_answer = test_set.tokenizer.decode(input_ids[i, round(abs(start_logits[i] * len(input_ids[i]))) : round(abs((end_logits[i] + 1) * len(input_ids[i])))])
+                start = round(abs(start_logits[i].item()) * len(test_set.contexts[i]))
+                end = round(abs(end_logits[i].item()) * len(test_set.contexts[i])) + 1
+
+                # If start > end, nothing is printed.
+
+                pred_answer = " ".join(test_set.contexts[i].split()[start: end])    
+                true_answer = test_set.answers[i]
+                print("-----TEST-----")
+                print(f"Sample {i+1}:")
+                print("Predicted Answer:", pred_answer)
+                print("True Answer:", true_answer)
+                if pred_answer == true_answer:
+                    total_em += 1
+                total_f1 += get_f1(pred_answer, true_answer)
+
+
+        print(total_em)
+        n = len(test_set)
+        avg_f1 = total_f1/n
+        avg_em = total_em/n
+
+        print(-(0.5 * avg_f1 + 0.5 * avg_em))
+
+    end = datetime.datetime.now()
+
+    print('All \t loss={:.4f} \t val_loss={:.4f} \t '.format(np.average(avg_losses_f),np.average(avg_val_losses_f)))
+
+    checkpoint = {
+        'epoch': num_epoch,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+    torch.save(checkpoint, model_path)
+
+    print('Model saved in ', model_path)
+    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
 
 def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
@@ -322,7 +379,8 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
 
             # Compute loss and backpropagate
             start_loss = criterion(start_logits, start_positions.to(torch.float))
-            end_loss = criterion(end_logits, end_positions.to(torch.float))            loss = (start_loss + end_loss) / 2
+            end_loss = criterion(end_logits, end_positions.to(torch.float))
+            loss = (start_loss + end_loss) / 2
 
             loss.backward()
             optimizer.step()
@@ -407,7 +465,7 @@ def test(model, dataset, device='cpu'):
     return -(0.5 * avg_f1 + 0.5 * avg_em)
 
 ## test based on scores
-def test_eval(model, dataset, device='cpu'):
+def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
     model.eval()
     test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
     pred = {}
@@ -422,46 +480,46 @@ def test_eval(model, dataset, device='cpu'):
             end_positions = batch["end_position"].to(device)
             question_ids = batch["question_ids"].to(device)
             contexts = batch["contexts"].to(device)
+            offset_mappings = batch.get("offset_mapping")
             
             start_logits, end_logits = model(input_ids, attention_mask)
 
-            # Convert logits to numpy arrays
-            # total_start_pos.extend(start_pos.cpu().numpy())
-            # total_end_pos.extend(end_pos.cpu().numpy())
-
-            start_logits = start_logits.cpu().numpy()
-            end_logits = end_logits.cpu().numpy()
-
-            ## Getting the most likely start and end positions
-            # start_pos = torch.argmax(start_logits, dim=1)
-            # end_pos = torch.argmax(end_logits, dim=1)
+            start_logits = start_logits.cpu().detach().numpy() #grad included
+            end_logits = end_logits.cpu().detach().numpy()
             
-            batch_pred = {}
-            batch_pred_score = {}
             for i in range(len(input_ids)):
-                max_score = -np.inf
-                best_answer = ""
+                qid = question_ids[i]
                 ctxt = contexts[i]
+                start_logit = start_logits[i]
+                end_logit = end_logits[i]
+                offset_mapping = offset_mappings[i]
+                answers = []
 
-                for j in range(len(ctxt)):
-                    for k in range(j, len(ctxt)):
-                        ans_candidate = ctxt[j:k+1]
-                        span_start_logits = start_logits[i, j]
-                        span_end_logits = end_logits[i, k]
-                        span_score = span_start_logits + span_end_logits
-                        
-                        batch_pred_score[ans_candidate] = span_score
+                for start_index in range(len(start_logit)):
+                    for end_index in range(start_index, len(end_logit)):
+                        if start_index <= end_index: # for each valid span
+                            score = start_logit[start_index] + end_logit[end_index]
+                            start_char = offset_mapping[start_index][0]
+                            end_char = offset_mapping[end_index][1]
+                            answers.append({
+                                "score": score,
+                                "text": ctxt[start_char:end_char]
+                            })
 
-                        if span_score > max_score:
-                            max_score = span_score
-                            best_answer = ans_candidate
+                answers = sorted(answers, key=lambda x: x["score"], reverse=True)
+                # save n best answers
+                answers = answers[:n_best_size]
+
+                # output only the top answer
+                if len(answers) > 0:
+                    pred[qid] = answers[0]["text"]
+                    # Save all n_best_size answers' scores
+                    scores[qid] = [{"start_logit": start_logit[start_index], "end_logit": end_logit[end_index]}
+                                   for start_index, end_index in [(ans["start_index"], ans["end_index"]) for ans in answers]]
+                else:
+                    pred[qid] = ""
+                    scores[qid] = []
                 
-                batch_pred[question_ids[i]] = best_answer
-                scores[question_ids[i]] = batch_pred_score
-            
-            # Update the overall predictions dictionary
-            pred.update(batch_pred)
-
     print("Final testing completed. Best answers computed.")
     return pred, scores
 
@@ -533,15 +591,30 @@ def main(args):
     model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
 
     x_train, y_train = extractAndMergeData(train_path)
-    
-    split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path)
+
+    test_set = biLSTMDataset(test_path)
+
+    split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
     #train_set = biLSTMDataset(train_path)
-    #test_set = biLSTMDataset(test_path)
 
     #train(model, train_set, num_epoch=10, batch_size=16, device=device)
     
-    test_outputs = test(model, dataset=test_set, device=device)
-    print(test_outputs)
+    #test_outputs = test(model, dataset=test_set, device=device)
+    #print(test_outputs)
+    test_outputs, test_scores = test(model, dataset=test_set, device=device)
+
+    json.dump(test_outputs, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
+    # test_outputs = test(model, dataset=test_set, device=device)
+
+    ## Checking outputs
+    # ## TODO: Remove ltr
+    # trunc_outputs = list(islice(test_outputs.items(), 10))
+    # trunc_scores = list(islice(test_scores.items(), 10))
+    # # Print the first 10 items
+    # for k, v in trunc_outputs:
+    #     print(f'{k}: {v}')
+    # for key, value in trunc_scores:
+    #     print(f'{k}: {v}')
 
     print('\n==== All done ====')
 
