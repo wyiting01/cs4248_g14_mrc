@@ -71,6 +71,18 @@ def preprocess_and_write(dataset):
         qns_id.append(question_id)
     return ctxt, qns, ans, span, qns_id
 
+def train_val_split(context, questions, answers, span, question_id):
+
+    num_examples = len(context)
+    num_train = int(0.8*num_examples)
+    ctxt_train, ctxt_val = context[:num_train], context[num_train:]
+    qns_train, qns_val = questions[:num_train], questions[num_train:]
+    ans_train, ans_val = answers[:num_train], answers[num_train:]
+    span_train, span_val = span[:num_train], span[num_train:]
+    qid_train, qid_val = question_id[:num_train], question_id[num_train:]
+
+    return ctxt_train, ctxt_val, qns_train, qns_val, ans_train, ans_val, span_train, span_val, qid_train, qid_val
+
 # Clean up input text to be more standardised (spelling & word form) and decrease dictionary size.
 # This does not expand contractions (isn't -> is not) because answer span will be affected.
 # Note: Due to nature of questions & answers, cannot remove all special characters as they are present in them.
@@ -131,12 +143,27 @@ def main(args):
         write_to_file('\t'.join(answer), "data/curated/test_data/answer")
         write_to_file('\t'.join(answer_span), "data/curated/test_data/answer_span")
         write_to_file('\t'.join(question_id), "data/curated/test_data/question_id")
+    elif args.train_val:
+        context, question, answer, answer_span, question_id = preprocess_and_write(dataset)
+        ctxt_train, ctxt_val, qns_train, qns_val, ans_train, ans_val, span_train, span_val, qid_train, qid_val = train_val_split(context, question, answer, answer_span, question_id)
+        write_to_file('\t'.join(ctxt_train), "data/curated/ensemble_data/train/context")
+        write_to_file('\t'.join(qns_train), "data/curated/ensemble_data/train/question")
+        write_to_file('\t'.join(ans_train), "data/curated/ensemble_data/train/answer")
+        write_to_file('\t'.join(span_train), "data/curated/ensemble_data/train/answer_span")
+        write_to_file('\t'.join(qid_train), "data/curated/ensemble_data/train/question_id")
+        write_to_file('\t'.join(ctxt_val), "data/curated/ensemble_data/val/context")
+        write_to_file('\t'.join(qns_val), "data/curated/ensemble_data/val/question")
+        write_to_file('\t'.join(ans_val), "data/curated/ensemble_data/val/answer")
+        write_to_file('\t'.join(span_val), "data/curated/ensemble_data/val/answer_span")
+        write_to_file('\t'.join(qid_val), "data/curated/ensemble_data/val/question_id")        
+
     
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_path', help='path to the json file for training or testing')
     parser.add_argument('--train', default=False, action='store_true', help='training data')
     parser.add_argument('--test', default=False, action='store_true', help='testing data')
+    parser.add_argument('--train_val', default=False, action='store_true', help='split train into train and val data')
     return parser.parse_args()
 
 if __name__ == "__main__":
