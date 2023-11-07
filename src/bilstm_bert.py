@@ -54,7 +54,7 @@ def read_content(file_path):
 class biLSTMDataset(Dataset):
     def __init__(self, in_path=None, x=None, y=None):
         print("Initialising dataset...")
-        self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
+        self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-cased')
 
         if in_path != None:
             contexts = read_content(f"{in_path}/context")
@@ -63,11 +63,11 @@ class biLSTMDataset(Dataset):
             spans = read_content(f"{in_path}/answer_span")
             question_ids = read_content(f"{in_path}/question_id")
 
-            self.contexts = [ctx.strip() for ctx in contexts][:10]
-            self.questions = [qn.strip() for qn in questions][:10]
-            self.answers = [ans.strip() for ans in answers][:10]
-            self.spans = [span.strip().split() for span in spans][:10]
-            self.question_ids = [qn_id.strip() for qn_id in question_ids][:10]
+            self.contexts = [ctx.strip() for ctx in contexts]
+            self.questions = [qn.strip() for qn in questions]
+            self.answers = [ans.strip() for ans in answers]
+            self.spans = [span.strip().split() for span in spans]
+            self.question_ids = [qn_id.strip() for qn_id in question_ids]
         else:
             self.contexts, self.questions, self.question_ids = zip(*x)
             self.answers, self.spans = zip(*y)
@@ -102,8 +102,10 @@ class biLSTMDataset(Dataset):
         for i, offsets in enumerate(self.offset_mapping):
             input_ids = self.encodings["input_ids"][i].tolist()
             cls_index = input_ids.index(self.tokenizer.cls_token_id)
-            sequence_ids = self.tokenizer.get_special_tokens_mask(input_ids, already_has_special_tokens=True)
-            
+            # sequence_ids = self.tokenizer.get_special_tokens_mask(input_ids, already_has_special_tokens=True)
+            sequence_ids = self.encodings["token_type_ids"][i]
+            attention_mask = self.encodings["attention_mask"][i]
+
             sample_index = self.sample_mapping[i]
             context = self.contexts[sample_index]
             answer = self.answers[sample_index]
@@ -123,7 +125,11 @@ class biLSTMDataset(Dataset):
                 token_start_index += 1
 
             token_end_index = len(input_ids) - 1
-            while sequence_ids[token_end_index] != 1:
+            # sequence_ids will be None for [PAD]
+            while token_end_index >= 0 and attention_mask[token_end_index] == 0:
+                token_end_index -= 1
+            # skip over the [SEP]
+            if token_end_index >= 0 and input_ids[token_end_index] == self.tokenizer.sep_token_id:
                 token_end_index -= 1
 
             # To find answers that are out of the span
@@ -138,7 +144,16 @@ class biLSTMDataset(Dataset):
                 while offsets[token_end_index][1] >= end_char_pos:
                     token_end_index -= 1
                 self.end_positions.append(token_end_index + 1)
-        print("Dataset initialisation complete.")
+
+            # print(f"Processed question ID: {self.question_ids[sample_index]}")
+            # print(f"Original context: {context}")
+            # print(f"Original answer: {answer}")
+            # print(f"Adjusted start_char_pos: {start_char_pos}, end_char_pos: {end_char_pos}")
+            # print(f"Token start index: {token_start_index}, Token end index: {token_end_index}")
+            # print(f"check offsets start: {offsets[token_start_index][0]}, offsets end: {offsets[token_end_index][1]}")
+            # print(f"Token start position: {self.start_positions[-1]}, Token end position: {self.end_positions[-1]}")
+            # print(f"Text from tokens: {' '.join(self.tokenizer.convert_ids_to_tokens(input_ids[self.start_positions[-1]:self.end_positions[-1]+1]))}")
+            print("Dataset initialisation complete.")
 
     def __len__(self):
         return len(self.contexts)
@@ -588,22 +603,22 @@ def main(args):
     #test_outputs = test(model, dataset=test_set, device=device)
     #print(test_outputs)
 
-    model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
+    # model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
 
-    x_train, y_train = extractAndMergeData(train_path)
+    # x_train, y_train = extractAndMergeData(train_path)
 
-    test_set = biLSTMDataset(test_path)
+    # test_set = biLSTMDataset(test_path)
 
-    split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
-    #train_set = biLSTMDataset(train_path)
+    # split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
+    train_set = biLSTMDataset(train_path)
 
     #train(model, train_set, num_epoch=10, batch_size=16, device=device)
     
     #test_outputs = test(model, dataset=test_set, device=device)
     #print(test_outputs)
-    test_outputs, test_scores = test(model, dataset=test_set, device=device)
+    # test_outputs, test_scores = test(model, dataset=test_set, device=device)
 
-    json.dump(test_outputs, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
+    # json.dump(test_outputs, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
     # test_outputs = test(model, dataset=test_set, device=device)
 
     ## Checking outputs
