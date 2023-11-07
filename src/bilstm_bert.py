@@ -34,12 +34,12 @@ num_layers=2
 num_labels=10
 batch_size=16
 learning_rate=5e-5
-num_epoch=5
+num_epoch=100
 dropout_rate=0.1
 seed = 0
 num_splits = 2
 max_length = 0
-n_best_size= 5
+n_best_size= 15
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -77,11 +77,11 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        self.contexts = self.contexts[:4]
-        self.questions = self.questions[:4]
-        self.answers = self.answers[:4]
-        self.spans = self.spans[:4]
-        self.question_ids = self.question_ids[:4]
+        # self.contexts = self.contexts[:4]
+        # self.questions = self.questions[:4]
+        # self.answers = self.answers[:4]
+        # self.spans = self.spans[:4]
+        # self.question_ids = self.question_ids[:4]
 
         # temp_zip = zip(self.contexts, self.questions)
         # max_length = max([len(zipped) for zipped in temp_zip])
