@@ -30,13 +30,13 @@ class SquadDataset(Dataset):
         with open(input_path + "/question_id", encoding='utf-8') as f:
             qids = f.read().split("\t")
 
-        self.contexts = [ctx.strip() for ctx in contexts]#[:10]
-        self.questions = [qn.strip() for qn in questions]#[:10]
-        self.answers = [ans.strip() for ans in answers]#[:10]
-        self.spans = [span.strip().split() for span in spans]#[:10]
+        self.contexts = [ctx.strip() for ctx in contexts]
+        self.questions = [qn.strip() for qn in questions]
+        self.answers = [ans.strip() for ans in answers]
+        self.spans = [span.strip().split() for span in spans]
         self.start_indices = [int(x[0]) for x in self.spans]
         self.end_indices = [int(x[1]) for x in self.spans]
-        self.qids = [qid.strip() for qid in qids]#[:10]
+        self.qids = [qid.strip() for qid in qids]
 
         # intialise XLNetTokenizerFast for input tokenization
         self.tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
