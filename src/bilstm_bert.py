@@ -34,7 +34,7 @@ num_layers=2
 num_labels=10
 batch_size=16
 learning_rate=5e-5
-num_epoch=10
+num_epoch=5
 dropout_rate=0.1
 seed = 0
 num_splits = 2
@@ -77,11 +77,11 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        self.contexts = self.contexts[:15]
-        self.questions = self.questions[:15]
-        self.answers = self.answers[:15]
-        self.spans = self.spans[:15]
-        self.question_ids = self.question_ids[:15]
+        self.contexts = self.contexts[:4]
+        self.questions = self.questions[:4]
+        self.answers = self.answers[:4]
+        self.spans = self.spans[:4]
+        self.question_ids = self.question_ids[:4]
 
         # temp_zip = zip(self.contexts, self.questions)
         # max_length = max([len(zipped) for zipped in temp_zip])
@@ -387,18 +387,13 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                             end_char = offset[end_index][1]
                             answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
 
-                            # answers.append({
-                            #     "score": score,
-                            #     "text": ctxt[start_char:end_char]
-                            # })
-
                 # sort by top scores
                 answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
                 pred[qid] = answers[0][3] if answers else ""
 
                 # Save all n_best_size answers' scores
                 scores[qid] = [
-                    {"score": float(score), "start_logit": start_logits[i][start_idx], "end_logit": end_logits[i][end_idx], "text": text}
+                    {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
                     for score, start_idx, end_idx, text in answers
                 ]
 
@@ -439,65 +434,6 @@ def get_f1(p, t):
         return 0
     f1 = 2 * (precision * recall) / (precision + recall)
     return f1
-
-## test based on scores
-def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
-    model.eval()
-    test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
-    pred = {}
-    scores = {}
-
-    print("Final testing on Test Dataset...")
-    with torch.no_grad():
-        for batch in test_loader:
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            start_positions = batch["start_positions"].to(device)
-            end_positions = batch["end_positions"].to(device)
-            question_ids = batch["question_ids"].to(device)
-            contexts = batch["contexts"].to(device)
-            offset_mappings = batch.get("offset_mapping")
-            
-            start_logits, end_logits = model(input_ids, attention_mask)
-
-            start_logits = start_logits.cpu().detach().numpy() #grad included
-            end_logits = end_logits.cpu().detach().numpy()
-            
-            for i in range(len(input_ids)):
-                qid = question_ids[i]
-                ctxt = contexts[i]
-                start_logit = start_logits[i]
-                end_logit = end_logits[i]
-                offset_mapping = offset_mappings[i]
-                answers = []
-
-                for start_index in range(len(start_logit)):
-                    for end_index in range(start_index, len(end_logit)):
-                        if start_index <= end_index: # for each valid span
-                            score = start_logit[start_index] + end_logit[end_index]
-                            start_char = offset_mapping[start_index][0]
-                            end_char = offset_mapping[end_index][1]
-                            answers.append({
-                                "score": score,
-                                "text": ctxt[start_char:end_char]
-                            })
-
-                answers = sorted(answers, key=lambda x: x["score"], reverse=True)
-                # save n best answers
-                answers = answers[:n_best_size]
-
-                # output only the top answer
-                if len(answers) > 0:
-                    pred[qid] = answers[0]["text"]
-                    # Save all n_best_size answers' scores
-                    scores[qid] = [{"start_logit": start_logit[start_index], "end_logit": end_logit[end_index]}
-                                   for start_index, end_index in [(ans["start_index"], ans["end_index"]) for ans in answers]]
-                else:
-                    pred[qid] = ""
-                    scores[qid] = []
-                
-    print("Final testing completed. Best answers computed.")
-    return pred, scores
 
 ## test based on scores
 def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
@@ -610,6 +546,8 @@ def main(args):
     train_path = args.train_path
     test_path = args.test_path
     model_path = args.model_path
+    output_path = args.output_path
+    score_path = args.score_path
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
@@ -638,8 +576,8 @@ def main(args):
     #print(test_outputs)
     # test_outputs, test_scores = test(model, dataset=test_set, device=device)
 
-    json.dump(test_outputs, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
-    json.dump(test_scores, open(sys.argv[-1],"w"), ensure_ascii=False, indent=4)
+    json.dump(test_outputs, open(output_path,"w"), ensure_ascii=False, indent=4)
+    json.dump(test_scores, open(score_path,"w"), ensure_ascii=False, indent=4)
     print('\nSuccessful json dump!')
 
     # test_outputs = test(model, dataset=test_set, device=device)
@@ -661,6 +599,8 @@ def get_arguments():
     parser.add_argument('--train_path', required=True, help='path to the training datasets')
     parser.add_argument('--test_path', required=True, help='path to the test datasets')
     parser.add_argument('--model_path', required=True, help='path to where the model is saved')
+    parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
+    parser.add_argument('--score_path', default="scores.json", help='path to model scores')
 
     return parser.parse_args()
 
