@@ -32,14 +32,14 @@ input_size=28
 hidden_dim=64
 num_layers=2
 num_labels=10
-batch_size=10
+batch_size=16
 learning_rate=5e-5
-num_epoch=5
+num_epoch=10
 dropout_rate=0.1
 seed = 0
 num_splits = 2
 max_length = 0
-n_best_size= 20
+n_best_size= 5
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -77,11 +77,11 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        self.contexts = self.contexts[:5]
-        self.questions = self.questions[:5]
-        self.answers = self.answers[:5]
-        self.spans = self.spans[:5]
-        self.question_ids = self.question_ids[:5]
+        self.contexts = self.contexts[:15]
+        self.questions = self.questions[:15]
+        self.answers = self.answers[:15]
+        self.spans = self.spans[:15]
+        self.question_ids = self.question_ids[:15]
 
         # temp_zip = zip(self.contexts, self.questions)
         # max_length = max([len(zipped) for zipped in temp_zip])
@@ -376,39 +376,37 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
                 ctxt = contexts[i]
                 start_logit = start_logits[i]
                 end_logit = end_logits[i]
-                offset_mapping = offset_mappings[i]
+                offset = offset_mappings[i]
                 answers = []
 
                 for start_index in range(len(start_logit)):
                     for end_index in range(start_index, len(end_logit)):
                         if start_index <= end_index: # for each valid span
                             score = start_logit[start_index] + end_logit[end_index]
-                            start_char = offset_mapping[start_index][0]
-                            end_char = offset_mapping[end_index][1]
-                            answers.append({
-                                "score": score,
-                                "text": ctxt[start_char:end_char]
-                            })
+                            start_char = offset[start_index][0]
+                            end_char = offset[end_index][1]
+                            answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
 
-                answers = sorted(answers, key=lambda x: x["score"], reverse=True)
+                            # answers.append({
+                            #     "score": score,
+                            #     "text": ctxt[start_char:end_char]
+                            # })
 
-                # save n best answers
-                answers = answers[:n_best_size]
+                # sort by top scores
+                answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
+                pred[qid] = answers[0][3] if answers else ""
 
-                # output only the top answer
-                if len(answers) > 0:
-                    pred[qid] = answers[0]["text"]
-                    # Save all n_best_size answers' scores
-                    scores[qid] = [{"start_logit": start_logits[i][ans["start_index"]], "end_logit": end_logits[i][ans["end_index"]]} for ans in answers]
-                    print(f"Question ID: {qid}")
-                    print(f"Context: {ctxt}")
-                    print(f"Predicted Answer: {answers[0]['text']}")
-                else:
-                    pred[qid] = ""
-                    scores[qid] = []
-                
+                # Save all n_best_size answers' scores
+                scores[qid] = [
+                    {"score": float(score), "start_logit": start_logits[i][start_idx], "end_logit": end_logits[i][end_idx], "text": text}
+                    for score, start_idx, end_idx, text in answers
+                ]
+
+                print(f"Question ID: {qid}")
+                print(f"Context: {ctxt}")
+                print(f"Predicted Answer: {pred[qid]}")
                 print(f"Top {n_best_size} predicted answers for Question ID {qid}:")
-                for ans in answers:
+                for ans in scores[qid]:
                     print(f"Score: {ans['score']:.4f}, Text: {ans['text']}")
                 
     end = datetime.datetime.now()
@@ -570,27 +568,27 @@ space = {
     # 'stride': hp.choice('stride', list(range(64, 257, 64)))
 }
 
-def objective(params):
-    # num_layers = int(params['num_layers'])
-    # hidden_dim = int(params['hidden_dim'])
-    learning_rate = params['learning_rate']
-    batch_size = int(params['batch_size'])
+# def objective(params):
+#     # num_layers = int(params['num_layers'])
+#     # hidden_dim = int(params['hidden_dim'])
+#     learning_rate = params['learning_rate']
+#     batch_size = int(params['batch_size'])
 
-    train_path = args.train_path
-    test_path = args.test_path
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+#     train_path = args.train_path
+#     test_path = args.test_path
+#     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
-    train_set = biLSTMDataset(in_path=train_path)
-    test_set = biLSTMDataset(in_path=test_path)
+#     train_set = biLSTMDataset(in_path=train_path)
+#     test_set = biLSTMDataset(in_path=test_path)
 
-    model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
-    print(model)
+#     model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
+#     print(model)
 
-    #TODO: change epoch val
-    train(model, train_set, batch_size, learning_rate, num_epoch=5, device=device)
+#     #TODO: change epoch val
+#     train(model, train_set, batch_size, learning_rate, num_epoch=5, device=device)
     
-    acc = test(model, dataset=test_set, device=device)
-    return {'loss': acc, 'status': STATUS_OK}
+#     acc = test(model, dataset=test_set, device=device)
+#     return {'loss': acc, 'status': STATUS_OK}
 
 def extractAndMergeData(in_path):
     contexts = read_content(f"{in_path}/context")
