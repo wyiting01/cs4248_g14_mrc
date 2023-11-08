@@ -34,12 +34,12 @@ num_layers=2
 num_labels=10
 batch_size=16
 learning_rate=5e-5
-num_epoch=100
+num_epoch=5
 dropout_rate=0.1
 seed = 0
 num_splits = 2
 max_length = 0
-n_best_size= 15
+n_best_size= 5
 
 # Ensure no randomisation for every iteration of run.
 def seed_all(seed=0):
@@ -77,11 +77,11 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        # self.contexts = self.contexts[:4]
-        # self.questions = self.questions[:4]
-        # self.answers = self.answers[:4]
-        # self.spans = self.spans[:4]
-        # self.question_ids = self.question_ids[:4]
+        self.contexts = self.contexts[:3]
+        self.questions = self.questions[:3]
+        self.answers = self.answers[:3]
+        self.spans = self.spans[:3]
+        self.question_ids = self.question_ids[:3]
 
         # temp_zip = zip(self.contexts, self.questions)
         # max_length = max([len(zipped) for zipped in temp_zip])
@@ -166,14 +166,14 @@ class biLSTMDataset(Dataset):
                     token_end_index -= 1
                 self.end_positions.append(token_end_index + 1)
 
-            # print(f"Processed question ID: {self.question_ids[sample_index]}")
-            # print(f"Original context: {context}")
-            # print(f"Original answer: {answer}")
-            # print(f"Adjusted start_char_pos: {start_char_pos}, end_char_pos: {end_char_pos}")
-            # print(f"Token start index: {token_start_index}, Token end index: {token_end_index}")
-            # print(f"check offsets start: {offsets[token_start_index][0]}, offsets end: {offsets[token_end_index][1]}")
-            # print(f"Token start position: {self.start_positions[-1]}, Token end position: {self.end_positions[-1]}")
-            # print(f"Text from tokens: {' '.join(self.tokenizer.convert_ids_to_tokens(input_ids[self.start_positions[-1]:self.end_positions[-1]+1]))}")
+            print(f"Processed question ID: {self.question_ids[sample_index]}")
+            print(f"Original context: {context}")
+            print(f"Original answer: {answer}")
+            print(f"Adjusted start_char_pos: {start_char_pos}, end_char_pos: {end_char_pos}")
+            print(f"Token start index: {token_start_index}, Token end index: {token_end_index}")
+            print(f"check offsets start: {offsets[token_start_index][0]}, offsets end: {offsets[token_end_index][1]}")
+            print(f"Token start position: {self.start_positions[-1]}, Token end position: {self.end_positions[-1]}")
+            print(f"Text from tokens: {' '.join(self.tokenizer.convert_ids_to_tokens(input_ids[self.start_positions[-1]:self.end_positions[-1]+1]))}")
             print("Dataset initialisation complete.")
 
     def __len__(self):
@@ -240,8 +240,6 @@ def collate_fn(batch):
     input_ids = pad_sequence(input_ids, batch_first=True)
     attention_masks = pad_sequence(attention_masks, batch_first=True)
     
-    # max_len = max(len(ids) for ids in input_ids)
-    # padded_offset_mappings = [mapping + [(0, 0)] * (max_len - len(mapping)) for mapping in offset_mappings]
     padded_offset_mappings = pad_sequence(offset_mappings, batch_first=True, padding_value=0)
 
     return {
@@ -249,7 +247,7 @@ def collate_fn(batch):
         "attention_mask": attention_masks,
         "start_positions": torch.tensor(start_positions).clone().detach(),
         "end_positions": torch.tensor(end_positions).clone().detach(),
-        "offset_mappings": torch.tensor(padded_offset_mappings).clone().detach(),
+        "offset_mappings": padded_offset_mappings,
         "question_ids": question_ids,
         "contexts": contexts
     }
@@ -299,10 +297,10 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
+                print(f"Batch {i} - Start Positions: {start_positions}")
+                print(f"Batch {i} - End Positions: {end_positions}")
                 print("Start log:", start_logits)
-                print("Start pos:", start_positions)
                 print("End log:", end_logits)
-                print("End pos:", end_positions)
 
                 start_loss = criterion(start_logits, start_positions)
                 end_loss = criterion(end_logits, end_positions)
