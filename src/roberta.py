@@ -45,7 +45,6 @@ class SquadDataset(Dataset):
         # extract tokenization outputs
         self.tokenizer_dict = self.tokenize()
         self.sample_mapping, self.offset_mapping = self.preprocess()
-
         self.input_ids = self.tokenizer_dict["input_ids"]
         self.attention_mask = self.tokenizer_dict["attention_mask"]
 
@@ -59,7 +58,6 @@ class SquadDataset(Dataset):
         output:
         1. tokenizer_dict, which contains
         - input_ids: list of integer values representing the tokenized text; each integer corresponds to a specific token
-        - token_type_ids: to distinguish between question and context
         - attention_mask: a binary mask that tells the model which tokens to mask/not mask
         - sample_mapping: map from a feature to its corresponding example, since one question-context pair might give several features
         - offset_mapping: maps each input id with the corresponding start and end characters in the original text
