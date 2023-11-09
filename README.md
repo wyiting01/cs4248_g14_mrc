@@ -144,61 +144,61 @@ To navigate around this rerpository, you can refer to the directory tree below:
 .
 ├── data
 |    ├── raw
-|        └── dev-v1.1.json
-|        └── train-v1.1.json
-|    ├── curated
-|        ├── ensemble_data
-|            ├── train
-|                 └── answer
-|                 └── answer_span
-|                 └── context
-|                 └── question
-|                 └── question_id
-|            ├── val
-|                 └── answer
-|                 └── answer_span
-|                 └── context
-|                 └── question
-|                 └── question_id
-|        ├── test_data
-|            └── answer
-|            └── answer_span
-|            └── context
-|            └── question
-|            └── question_id
-|        ├── training_data
-|            └── answer
-|            └── answer_span
-|            └── context
-|            └── question
-|            └── question_id
+|    |    ├── dev-v1.1.json
+|    |    └── train-v1.1.json
+|    └── curated
+|         ├── ensemble_data
+|         |    ├── train
+|         |    |    ├── answer
+|         |    |    ├── answer_span
+|         |    |    ├── context
+|         |    |    ├── question
+|         |    |    └── question_id
+|         |    └── val
+|         |         ├── answer
+|         |         ├── answer_span
+|         |         ├── context
+|         |         ├── question
+|         |         └── question_id
+|         ├── test_data
+|         |    ├── answer
+|         |    ├── answer_span
+|         |    ├── context
+|         |    ├── question
+|         |    └── question_id
+|         └── training_data
+|              ├── answer
+|              ├── answer_span
+|              ├── context
+|              ├── question
+|              └── question_id
 ├── model
-|    └── bert_squad.pt
-|    └── bilstm.pt
-|    └── roberta.pt
+|    ├── bert_squad.pt
+|    ├── bilstm.pt
+|    ├── roberta.pt
 |    └── xlnet.pt
 ├── output
-|    └── bert_squad_pred.json
-|    └── bilstm_pred.json
-|    └── ensemble_max_pred.json
-|    └── ensemble_mul_pred.json
-|    └── ensemble_optuna_pred.json
-|    └── ensemble_max_voting_pred.json
-|    └── robert_pred.json
+|    ├── bert_squad_pred.json
+|    ├── bilstm_pred.json
+|    ├── ensemble_max_pred.json
+|    ├── ensemble_mul_pred.json
+|    ├── ensemble_optuna_pred.json
+|    ├── ensemble_max_voting_pred.json
+|    ├── robert_pred.json
 |    └── xlnet_pred.json
 ├── src
-|    └── preprocessing.py
-|    └── evaluate-v2.0.py
+|    ├── preprocessing.py
+|    ├── evaluate-v2.0.py
 |    ├── baseline
-|        └── bilstm_bert.py
-|        └── bert_squad.py
-|        └── roberta.py
-|        └── xlnet.py
-|    ├── ensemble
-|        └── ensemble_equal_weighting.py
-|        └── ensemble_optuna.ipynb
-|        └── ensemble_unequal_optuna.py
-|        └── max_vote.py
+|    |    ├── bilstm_bert.py
+|    |    ├── bert_squad.py
+|    |    ├── roberta.py
+|    |    └── xlnet.py
+|    └── ensemble
+|         ├── ensemble_equal_weighting.py
+|         ├── ensemble_optuna.ipynb
+|         ├── ensemble_unequal_optuna.py
+|         └── max_vote.py
 └── README.md
 ```
 
