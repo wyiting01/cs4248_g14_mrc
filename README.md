@@ -176,6 +176,8 @@ To navigate around this rerpository, you can refer to the directory tree below:
 |    └── bilstm_pred.json
 |    └── ensemble_max_pred.json
 |    └── ensemble_mul_pred.json
+|    └── ensemble_optuna_ped.json
+|    └── ensemble_max_voting_pred.json
 |    └── robert_pred.json
 |    └── xlnet_pred.json
 ├── src
