@@ -48,7 +48,7 @@ def read_content(file_path):
 class biLSTMDataset(Dataset):
     def __init__(self, in_path=None, x=None, y=None):
         print("Initialising dataset...")
-        self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
+        self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-cased')
 
         if in_path != None:
             contexts = read_content(f"{in_path}/context")
@@ -145,7 +145,7 @@ class BERT_BiLSTM(nn.Module):
         super(BERT_BiLSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
+        self.bert_encoder = BertModel.from_pretrained('bert-base-cased')
         self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
         self.start_out = nn.Linear(hidden_dim * 2, 1)
         self.end_out = nn.Linear(hidden_dim * 2, 1)
