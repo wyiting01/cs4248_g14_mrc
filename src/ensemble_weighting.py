@@ -1,13 +1,16 @@
 '''
-python ensemble_optuna.py --train --xlnet --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --albert_path "../model/albert.pt" --xlnet_dict "../xlnet.json" --albert_dict "../albert.json"
-python ensemble_optuna.py --train --albert --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --albert_path "../model/albert.pt" --xlnet_dict "../xlnet.json" --albert_dict "../albert.json"
+- to train xlnet and roberta on 80% of train-v1.1.json
+python ensemble_weighting.py --train --roberta --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
+python ensemble_weighting.py --train --xlnet --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
 
-python ensemble_weighting.py --get_candidates --xlnet --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --albert_path "../model/albert.pt" --xlnet_dict "../ensemble/xlnet_val.json" --albert_dict "../ensemble/albert_val.json.json"
-python ensemble_weighting.py --get_candidates --albert --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --albert_path "../model/albert.pt" --xlnet_dict "../ensemble/xlnet_val.json" --albert_dict "../ensemble/albert_val.json"
+- to obtain the possible candidates along their scores for validation data (20% of train-v1.1.json) for optuna trials to determine optimal weights (refer to ensemble_optuna.ipynb)
+python ensemble_weighting.py --get_candidates --xlnet --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
+python ensemble_weighting.py --get_candidates --roberta --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
 
-python ensemble_weighting.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --albert_path "../model/albert.pt" --xlnet_dict "../ensemble/xlnet_test.json" --albert_dict "../ensemble/albert_test.json"
-python ensemble_weighting.py --get_candidates --albert --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --albert_path "../model/albert.pt" --xlnet_dict "../ensemble/xlnet_test.json" --albert_dict "../ensemble/albert_test.json"
-python ensemble_weighting.py --test --xlnet_dict "../ensemble/xlnet.json" --albert_dict "../ensemble/albert.json" --output_path "../ensemble/final.json" --xlnet_weight 0.76 --albert_weight 0.24
+- to obtain the possible candidates along their scores for test data and apply optimal weights to obtain final prediction
+python ensemble_weighting.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_weighting.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_weighting.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
 '''
 
 import argparse
@@ -23,12 +26,12 @@ import collections
 import optuna
 from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
-from transformers import AlbertForQuestionAnswering, AlbertTokenizerFast, XLNetForQuestionAnswering, XLNetTokenizerFast
+from transformers import RobertaTokenizerFast, RobertaForQuestionAnswering, XLNetForQuestionAnswering, XLNetTokenizerFast
 import xlnet
 import albert
-import ensemble_optuna
+import roberta
 
-def test_albert(model, dataset, n_best_size=20, device='cpu'):
+def test_roberta(model, dataset, n_best_size=20, device='cpu'):
     model.eval()
 
     test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
@@ -139,7 +142,40 @@ def test_xlnet(model, dataset, n_best_size=20, device='cpu'):
 
     return pred
 
-def post_processing(score_dict, max_answer_length=150):
+def weighting_score(xlnet, roberta, w1, w2):
+    wdict  = {}
+    for qns_id in xlnet.keys():
+        xlnet_ans_start = xlnet.get(qns_id).get('start')
+        roberta_ans_start = roberta.get(qns_id).get('start')
+        ans = roberta.get(qns_id).get('answers')
+        ctxt = roberta.get(qns_id).get('context')
+
+        weighted_ans_start = {}
+
+        for key, val in roberta_ans_start.items(): # start w xlnet as it has less candidates
+            #roberta_score = roberta_ans_start.get(key)
+            xlnet_score = xlnet_ans_start.get(key)
+            if xlnet_score == None:
+                weighted_ans_start[key] = w2*float(val)
+            else:
+                 weighted_ans_start[key] = w1*float(xlnet_score) + w2*float(val)
+
+        xlnet_ans_end = xlnet.get(qns_id).get('end')
+        roberta_ans_end = roberta.get(qns_id).get('end')
+        
+        weighted_ans_end = {}
+
+        for key, val in roberta_ans_end.items(): # start w xlnet as it has less candidates
+            #roberta_score = roberta_ans_end.get(key)
+            xlnet_score = xlnet_ans_end.get(key)
+            if xlnet_score == None:
+                weighted_ans_end[key] = w2*float(val)
+            else:
+                weighted_ans_end[key] = w1*float(xlnet_score) + w2*float(val)
+        wdict[qns_id] = {"start": weighted_ans_start, "end": weighted_ans_end, "context": ctxt, "answer": ans}
+    return wdict
+
+def post_processing(score_dict, max_answer_length=100):
     pred = {}
     for qid in score_dict.keys():
         ans = score_dict.get(qid).get('answer')
@@ -189,27 +225,27 @@ def main(args):
             # train the xlnet model
             xlnet.train(model=xlnet_model, dataset=xlnet_dataset, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=args.xlnet_path)
 
-        if args.albert:
-            print("Initialising Albert Model")
-            albert_model = AlbertForQuestionAnswering.from_pretrained("albert-base-v2").to(device)
-            albert_dataset = albert.SquadDataset(args.data_path)
+        if args.roberta:
+            print("Initialising roberta Model")
+            roberta_model = RobertaForQuestionAnswering.from_pretrained('roberta-base').to(device)
+            roberta_dataset = roberta.SquadDataset(args.data_path)
 
-            # train the albert model
-            albert.train(model=albert_model, dataset=albert_dataset, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=args.albert_path)
+            # train the roberta model
+            roberta.train(model=roberta_model, dataset=roberta_dataset, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=args.roberta_path)
     
     elif args.get_candidates:
       
-        if args.albert:
+        if args.roberta:
         
-            albert_model = AlbertForQuestionAnswering.from_pretrained("albert-base-v2").to(device)
-            albert_checkpt = torch.load(args.albert_path)
-            albert_model.load_state_dict(albert_checkpt['model_state_dict'])
-            albert_validation = albert.SquadDataset(args.data_path)
+            roberta_model = RobertaForQuestionAnswering.from_pretrained('roberta-base').to(device)
+            roberta_checkpt = torch.load(args.roberta_path)
+            roberta_model.load_state_dict(roberta_checkpt['model_state_dict'])
+            roberta_validation = roberta.SquadDataset(args.data_path)
 
-            albert_pred = test_albert(albert_model, albert_validation, n_best_size=20, device=device)
+            roberta_pred = test_roberta(roberta_model, roberta_validation, n_best_size=20, device=device)
 
-            with open(args.albert_dict, 'w') as f:
-                json.dump(albert_pred, f)
+            with open(args.roberta_dict, 'w') as f:
+                json.dump(roberta_pred, f)
 
         if args.xlnet:
             
@@ -226,11 +262,11 @@ def main(args):
     elif args.test:
         f1 = open(args.xlnet_dict)
         xlnet_pred = json.load(f1)
-        f2 = open(args.albert_dict)
-        albert_pred = json.load(f2)
+        f2 = open(args.roberta_dict)
+        roberta_pred = json.load(f2)
 
-        print("Doing weighting on xlnet and albert")
-        weighted_score_dict = ensemble_optuna.weighting_score(xlnet_pred, albert_pred, float(args.xlnet_weight), float(args.albert_weight))
+        print("Doing weighting on xlnet and roberta")
+        weighted_score_dict = weighting_score(xlnet_pred, roberta_pred, float(args.xlnet_weight), float(args.roberta_weight))
         final_pred = post_processing(weighted_score_dict)
 
         with open(args.output_path, 'w') as f:
@@ -242,14 +278,14 @@ def get_arguments():
     parser.add_argument('--get_candidates', default=False, action='store_true', help='get candidates for test data')
     parser.add_argument('--test', default=False, action='store_true', help='generating output for test data')
     parser.add_argument('--xlnet', default=False, action='store_true', help='get xlnet dict')
-    parser.add_argument('--albert', default=False, action='store_true', help='get albert dict')
+    parser.add_argument('--roberta', default=False, action='store_true', help='get roberta dict')
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--xlnet_path', help='path to save trained xlnet model')
-    parser.add_argument('--albert_path', help='path to save trained albert model')
+    parser.add_argument('--roberta_path', help='path to save trained roberta model')
     parser.add_argument('--xlnet_dict', help='path to save xlnet pred on val')
-    parser.add_argument('--albert_dict', help='path to save albert pred on val')
+    parser.add_argument('--roberta_dict', help='path to save roberta pred on val')
     parser.add_argument('--output_path', help='path to save final output')
-    parser.add_argument('--albert_weight', default=0.5, help='path to save albert pred on val')
+    parser.add_argument('--roberta_weight', default=0.5, help='path to save roberta pred on val')
     parser.add_argument('--xlnet_weight', default=0.5, help='path to save final output')
     return parser.parse_args()
 
