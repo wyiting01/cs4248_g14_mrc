@@ -131,3 +131,71 @@ In this approach, we will deploy the Optuna framework for hyperparameter optimsa
 # Part C: Perform weighting based on Optuna weights
 ```
 > Note that part a and b cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
+
+## Directory Structure
+To navigate around this rerpository, you can refer to the directory tree below:
+```
+.
+├── data
+|    ├── raw
+|        └── dev-v1.1.json
+|        └── train-v1.1.json
+|    ├── curated
+|        ├── ensemble_data
+|            ├── train
+|                 └── answer
+|                 └── answer_span
+|                 └── context
+|                 └── question
+|                 └── question_id
+|            ├── val
+|                 └── answer
+|                 └── answer_span
+|                 └── context
+|                 └── question
+|                 └── question_id
+|        ├── test_data
+|            └── answer
+|            └── answer_span
+|            └── context
+|            └── question
+|            └── question_id
+|        ├── training_data
+|            └── answer
+|            └── answer_span
+|            └── context
+|            └── question
+|            └── question_id
+├── model
+|    └── bert_squad.pt
+|    └── bilstm.pt
+|    └── roberta.pt
+|    └── xlnet.pt
+├── output
+|    └── bert_squad_pred.json
+|    └── bilstm_pred.json
+|    └── ensemble_max_pred.json
+|    └── ensemble_mul_pred.json
+|    └── robert_pred.json
+|    └── xlnet_pred.json
+├── src
+|    └── preprocessing.py
+|    └── evaluate-v2.0.py
+|    ├── individual
+|        └── bilstm_bert.py
+|        └── bert_squad.py
+|        └── roberta.py
+|        └── xlnet.py
+|    ├── ensemble
+|        └── ensemble_equal_weighting.py
+|        └── ensemble_optuna.ipynb
+|        └── ensemble_unequal_weighting.py
+|        └── max_vote.py
+└── README.md
+```
+
+## Folder Contents:
+1. **data/** : This folder consists of all the raw and processed data for training and evaluation
+2. **model/** : This folder consists of model weights for our model mentioned above
+3. **output/** : This folder consists of all the predictions output by each model mentioned above
+4. **src/** : This folder consists of the code needed for this entire project - preprocessing, individual model, ensemble model, and official evaluation script from SQuAD.
