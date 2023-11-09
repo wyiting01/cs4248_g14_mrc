@@ -124,17 +124,17 @@ In this approach, we will deploy the Optuna framework for hyperparameter optimsa
 
 ```
 # Part A: Training on train set (80% of train-v1.1.json)
-python ensemble_weighting.py --train --roberta --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
-python ensemble_weighting.py --train --xlnet --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
+python ensemble_unequal_weighting.py --train --roberta --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
+python ensemble_unequal_weighting.py --train --xlnet --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
 
 # Part B: Obtaining candidates for validation set (20% of train-v1.1.json)
-python ensemble_weighting.py --get_candidates --xlnet --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
-python ensemble_weighting.py --get_candidates --roberta --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
+python ensemble_unequal_weighting.py --get_candidates --xlnet --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
+python ensemble_unequal_weighting.py --get_candidates --roberta --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
 
 # Part C: Obtaining candidates for test set and perform weighting based on Optuna weights
-python ensemble_weighting.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_weighting.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_weighting.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
+python ensemble_unequal_weighting.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_unequal_weighting.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_unequal_weighting.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
 ```
 > Note that training of both models (as well as getting candidates) cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
 
