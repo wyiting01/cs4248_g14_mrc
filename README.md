@@ -27,7 +27,7 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 | | biLSTM | TBC | TBC | 
 | ENSEMBLE | Equal - Maximum | 78.9877010406811 | 86.7818746223915 |
 | | Equal - Multiplicative | 80.9176915799432 | 88.1576578932468 |
-| | Unequal - Optuna | TBC | TBC
+| | Unequal - Optuna | 81.47587511825922 | 88.20920854244099
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
@@ -117,20 +117,26 @@ python src/ensemble.py\
 ### Unequal Weightage
 **3. Weighting based on Optuna**  
 In this approach, we will deploy the Optuna framework for hyperparameter optimsation.  
-- **Part A**: The training data `train-v1.1.json` will be split into train set and validation set (80:20), which can be obtained by running the third line illustrated under Data Preprocessing section.  
-- **Part B**: The base models mentioned above will be trained using the train set.  
-- **Part C**: We then combine the scores for the common indices using weights determined by Optuna framework which helps in hyperparameter optimsation by searching for the optimal weight values by trial and error on the validation data.
+- **Preprocessing**: The training data `train-v1.1.json` will be split into train set and validation set (80:20), which can be obtained by running the third line illustrated under Data Preprocessing section.  
+- **Part A**: The base models mentioned above will be trained using the train set.
+- **Part B**: We then get candidates indices and their scores for the validation set and use Optuna framework to obtain the optimal weights by trial and error. (src/ensemble_optuna.ipynb)
+- **Part C**: Lastly, we get candidates indices and their scores for the test set, and combine the scores for the common indices using weights determined in Part B.
 
 ```
-# Part A: training on train set
+# Part A: Training on train set (80% of train-v1.1.json)
+python ensemble_unequal_optuna.py --train --roberta --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
+python ensemble_unequal_optuna.py --train --xlnet --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
 
+# Part B: Obtaining candidates for validation set (20% of train-v1.1.json)
+python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
+python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
 
-# Part B: obtaining candidates for validation set
-
-
-# Part C: Perform weighting based on Optuna weights
+# Part C: Obtaining candidates for test set and perform weighting based on Optuna weights
+python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_unequal_optuna.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
 ```
-> Note that part a and b cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
+> Note that training of both models (as well as getting candidates) cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
 
 ## Directory Structure
 To navigate around this rerpository, you can refer to the directory tree below:
@@ -176,7 +182,7 @@ To navigate around this rerpository, you can refer to the directory tree below:
 |    └── bilstm_pred.json
 |    └── ensemble_max_pred.json
 |    └── ensemble_mul_pred.json
-|    └── ensemble_optuna_ped.json
+|    └── ensemble_optuna_pred.json
 |    └── ensemble_max_voting_pred.json
 |    └── robert_pred.json
 |    └── xlnet_pred.json
@@ -191,7 +197,7 @@ To navigate around this rerpository, you can refer to the directory tree below:
 |    ├── ensemble
 |        └── ensemble_equal_weighting.py
 |        └── ensemble_optuna.ipynb
-|        └── ensemble_unequal_weighting.py
+|        └── ensemble_unequal_optuna.py
 |        └── max_vote.py
 └── README.md
 ```
