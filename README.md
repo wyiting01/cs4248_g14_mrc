@@ -21,7 +21,7 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 
 |  | Model | Exact | F1 |
 | ---- | ----- | ----- | -- |
-| BASE | BERT-SQuAD | 57.79564806054872 | 72.18288133527203 |
+| BASELINE | BERT-SQuAD | 57.79564806054872 | 72.18288133527203 |
 | | RoBERTa | 81.20151371807 | 88.41621816924753 |
 | | XLNet | 75.34531693472091 | 84.06374401013184 |
 | | biLSTM | TBC | TBC | 
@@ -35,7 +35,7 @@ python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 ```
 > Note that `pred.json` can be replaced with any output json files containing the predictions of your target model found in `output/`
 
-## Base Models
+## Baseline Models
 
 ### 1. BERT-SQuAD
 - Script: `src/bert.py`
@@ -183,7 +183,7 @@ To navigate around this rerpository, you can refer to the directory tree below:
 ├── src
 |    └── preprocessing.py
 |    └── evaluate-v2.0.py
-|    ├── individual
+|    ├── baseline
 |        └── bilstm_bert.py
 |        └── bert_squad.py
 |        └── roberta.py
@@ -198,6 +198,6 @@ To navigate around this rerpository, you can refer to the directory tree below:
 
 ## Folder Contents:
 1. **data/** : This folder consists of all the raw and processed data for training and evaluation
-2. **model/** : This folder consists of model weights for our model mentioned above
+2. **model/** : This folder consists of all model weights for our models mentioned above
 3. **output/** : This folder consists of all the predictions output by each model mentioned above
 4. **src/** : This folder consists of the code needed for this entire project - preprocessing, individual model, ensemble model, and official evaluation script from SQuAD.
