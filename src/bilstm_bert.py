@@ -539,6 +539,59 @@ def extractAndMergeData(in_path):
 
     return list(zip(contexts, questions, question_ids)), list(zip(answers, spans))
 
+def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
+    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+
+    start = datetime.datetime.now()
+    for epoch in range(num_epoch):
+        model.train()
+        total_loss = 0.0
+        for step, batch in enumerate(train_loader, 0):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            
+            start_positions = batch["start_positions"].to(device).long()
+            end_positions = batch["end_positions"].to(device).long()
+
+            optimizer.zero_grad()
+
+            start_logits, end_logits = model(input_ids, attention_mask)
+
+            print(f"Batch {batch} - Start Positions: {start_positions}")
+            print(f"Batch {batch} - End Positions: {end_positions}")
+            print("Start log:", start_logits)
+            print("End log:", end_logits)
+
+            start_loss = criterion(start_logits, start_positions)
+            end_loss = criterion(end_logits, end_positions)
+            loss = (start_loss + end_loss) / 2
+
+            loss.backward()
+
+            optimizer.step()
+
+            total_loss += loss.item() / len(train_loader)
+            
+            if step % 100 == 99:
+                print('[%d, %5d] loss: %.3f' %
+                    (epoch + 1, step + 1, total_loss / 100))
+    end = datetime.datetime.now()
+
+    checkpoint = {
+        'epoch': num_epoch,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+    torch.save(checkpoint, model_path)
+
+    print('Model saved in ', model_path)
+    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
+    return {'loss': total_loss/len(train_loader), 'status': STATUS_OK}
+
 def main(args):
     train_path = args.train_path
     test_path = args.test_path
@@ -606,58 +659,7 @@ if __name__ == "__main__":
     main(args)
 
 
-def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
 
-    start = datetime.datetime.now()
-    for epoch in range(num_epochs):
-        model.train()
-        total_loss = 0.0
-        for step, batch in enumerate(train_loader, 0):
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            
-            start_positions = batch["start_positions"].to(device).long()
-            end_positions = batch["end_positions"].to(device).long()
-
-            optimizer.zero_grad()
-
-            start_logits, end_logits = model(input_ids, attention_mask)
-
-            print(f"Batch {i} - Start Positions: {start_positions}")
-            print(f"Batch {i} - End Positions: {end_positions}")
-            print("Start log:", start_logits)
-            print("End log:", end_logits)
-
-            start_loss = criterion(start_logits, start_positions)
-            end_loss = criterion(end_logits, end_positions)
-            loss = (start_loss + end_loss) / 2
-
-            loss.backward()
-
-            optimizer.step()
-
-            total_loss += loss.item() / len(train_loader)
-            
-            if step % 100 == 99:
-                print('[%d, %5d] loss: %.3f' %
-                    (epoch + 1, step + 1, total_loss / 100))
-    end = datetime.datetime.now()
-
-    checkpoint = {
-        'epoch': num_epoch,
-        'lr': learning_rate,
-        'batch_size': batch_size,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict()
-    }
-    torch.save(checkpoint, model_path)
-
-    print('Model saved in ', model_path)
-    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
-    return {'loss': total_loss/len(data_loader), 'status': STATUS_OK}
 
 # def test(model, dataset, device='cpu'):
 #     model.eval()
