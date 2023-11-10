@@ -10,7 +10,7 @@ python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../dat
 - to obtain the possible candidates along their scores for test data and apply optimal weights to obtain final prediction
 python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
 python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_unequal_optuna.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
+python ensemble_unequal_optuna.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.39 --roberta_weight 0.61
 '''
 
 import argparse
@@ -275,18 +275,18 @@ def main(args):
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', default=False, action='store_true', help='train the model')
-    parser.add_argument('--get_candidates', default=False, action='store_true', help='get candidates for test data')
-    parser.add_argument('--test', default=False, action='store_true', help='generating output for test data')
-    parser.add_argument('--xlnet', default=False, action='store_true', help='get xlnet dict')
-    parser.add_argument('--roberta', default=False, action='store_true', help='get roberta dict')
+    parser.add_argument('--get_candidates', default=False, action='store_true', help='get candidates for test/val data')
+    parser.add_argument('--test', default=False, action='store_true', help='generate final prediction for test data')
+    parser.add_argument('--xlnet', default=False, action='store_true', help='get candidates for xlnet')
+    parser.add_argument('--roberta', default=False, action='store_true', help='get candidates for roberta')
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--xlnet_path', help='path to save trained xlnet model')
     parser.add_argument('--roberta_path', help='path to save trained roberta model')
-    parser.add_argument('--xlnet_dict', help='path to save xlnet pred on val')
-    parser.add_argument('--roberta_dict', help='path to save roberta pred on val')
-    parser.add_argument('--output_path', help='path to save final output')
-    parser.add_argument('--roberta_weight', default=0.5, help='path to save roberta pred on val')
-    parser.add_argument('--xlnet_weight', default=0.5, help='path to save final output')
+    parser.add_argument('--xlnet_dict', help='path to save xlnet pred on val/test data')
+    parser.add_argument('--roberta_dict', help='path to save roberta pred on val/test data')
+    parser.add_argument('--output_path', help='path to save final prediction for test data')
+    parser.add_argument('--roberta_weight', default=0.5, help='roberta weight for ensemble')
+    parser.add_argument('--xlnet_weight', default=0.5, help='xlnet weight for ensemble')
     return parser.parse_args()
 
 if __name__ == "__main__":
