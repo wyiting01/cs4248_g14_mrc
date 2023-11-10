@@ -7,13 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
-from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
-import argparse
-import xlnet
-from bert.bert import QA
-from bert.utils import *
-from bilstm_bert import *
-from collections import Counter
+from transformers import RobertaTokenizerFast, RobertaForQuestionAnswering
 
 torch.manual_seed(0)
 
@@ -45,15 +39,13 @@ class SquadDataset(Dataset):
         self.qids = [qid.strip() for qid in qids]
 
         # intialise XLNetTokenizerFast for input tokenization
-        self.tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
+        self.tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
         self.tokenizer.padding_side = "right"
 
         # extract tokenization outputs
         self.tokenizer_dict = self.tokenize()
         self.sample_mapping, self.offset_mapping = self.preprocess()
-
         self.input_ids = self.tokenizer_dict["input_ids"]
-        self.token_type_ids = self.tokenizer_dict["token_type_ids"]
         self.attention_mask = self.tokenizer_dict["attention_mask"]
 
 
@@ -66,7 +58,6 @@ class SquadDataset(Dataset):
         output:
         1. tokenizer_dict, which contains
         - input_ids: list of integer values representing the tokenized text; each integer corresponds to a specific token
-        - token_type_ids: to distinguish between question and context
         - attention_mask: a binary mask that tells the model which tokens to mask/not mask
         - sample_mapping: map from a feature to its corresponding example, since one question-context pair might give several features
         - offset_mapping: maps each input id with the corresponding start and end characters in the original text
@@ -162,18 +153,77 @@ class SquadDataset(Dataset):
 
         }
         return item_dict
-
-def predict(dataset, xlnet_model, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
-    print("Beginning Prediction")
-    pred_data = DataLoader(dataset=dataset, batch_size=16, shuffle=False)
-    bert = QA('bert/model')
     
+def train(model, dataset, batch_size=16, learning_rate=5e-5, num_epoch=10, device='cpu', model_path=None):
+
+    print("Training RoBERTa Model")
+
+    data_loader = DataLoader(dataset, batch_size=batch_size)
+    optimizer = AdamW(model.parameters(), lr=learning_rate)
+
+    start = datetime.datetime.now()
+    for epoch in range(num_epoch):
+        model.train()
+
+        for step, batch in enumerate(data_loader, 0):
+            
+            # get the inputs; batch is a dict
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            start_positions = batch['start_positions'].to(device)
+            end_positions = batch['end_positions'].to(device)
+
+            # zero the parameter gradients
+            optimizer.zero_grad()
+
+            # do forward propagation
+            outputs = model(input_ids, attention_mask=attention_mask, start_positions=start_positions, end_positions=end_positions)
+
+            # calculate the loss
+            loss = outputs[0]
+
+            # do backward propagation
+            loss.backward()
+
+            # do the parameter optimization
+            optimizer.step()
+
+            # print loss value every 100 iterations and reset running loss
+            if step % 100 == 99:
+                print('[%d, %5d] loss: %.3f' %
+                    (epoch + 1, step + 1, loss / 100))
+
+    end = datetime.datetime.now()
+
+    # save trained model
+    checkpoint = {
+        'epoch': num_epoch,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+    torch.save(checkpoint, model_path)
+
+    print('Model saved in ', model_path)
+    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
+
+def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
+    model.eval()
+
+    test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
+
+    pred = {}
+
+    print("Making Predictions on Test Dataset")
     with torch.no_grad():
-        for data in pred_data:
+        for data in test_dataloader:
             input_ids = data["input_ids"].to(device)
             attention_mask = data["attention_mask"].to(device)
             start = data["start_positions"].to(device)
             end = data["end_positions"].to(device)
+            
+            output = model(input_ids=input_ids, attention_mask=attention_mask)
 
             offset_mapping = data["offset_mapping"]
             context = data["og_contexts"]
@@ -181,34 +231,22 @@ def predict(dataset, xlnet_model, bilstm_model, n_best_size,device='cpu', max_an
             question = data["og_questions"]
             qids = data["og_question_ids"]
 
-            output = xlnet_model(input_ids=input_ids, attention_mask=attention_mask)
-
             for i in range(len(input_ids)):
-                print(question[i])
-                # BERT MODEL
-                bert_pred = bert.predict_full(context[i], question[i])
-
-                # XLNET  Model
-                pred = {}
-                start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
-                end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
+                start_logits = output.start_logits[i].cpu().detach().numpy()
+                end_logits = output.end_logits[i].cpu().detach().numpy()
                 start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
                 end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
-
-                start_top_indexes = output.start_top_index[i]
-                end_top_indexes = output.end_top_index[i]
 
                 offsets = offset_mapping[i]
                 ctxt = context[i]
                 qid = qids[i]
+                curr_ans = answer[i]
 
                 valid_answers = []
-                for start in start_indexes:
-                    for end in end_indexes:
-                        start_index = start_top_indexes[start]
-                        end_index = end_top_indexes[end]
-                        # exclude out-of-scope answers, either because the indices are out of bounds or correspond
-                        # to part of the input_ids that are not in the context
+                for start_index in start_indexes:
+                    for end_index in end_indexes:
+                        # Don't consider out-of-scope answers, either because the indices are out of bounds or correspond
+                        # to part of the input_ids that are not in the context.
                         if (
                             start_index >= len(offsets)
                             or end_index >= len(offsets)
@@ -216,74 +254,71 @@ def predict(dataset, xlnet_model, bilstm_model, n_best_size,device='cpu', max_an
                             or offsets[end_index] is None
                         ):
                             continue
-                        # exclude answers with lengths < 0 or > max_answer_length
+                        # Don't consider answers with a length that is either < 0 or > max_answer_length.
                         if end_index < start_index or end_index - start_index + 1 > max_answer_length:
                             continue
-                        # for valid answers, we will calculate the score and extract the answers out
-                        if start_index <= end_index:
+                        if start_index <= end_index: # We need to refine that test to check the answer is inside the context
                             start_char = offsets[start_index][0]
                             end_char = offsets[end_index][1]
                             valid_answers.append(
                                 {
-                                    "score": start_logits[start] + end_logits[end],
+                                    "score": start_logits[start_index] + end_logits[end_index],
                                     "text": ctxt[start_char: end_char]
                                 }
                             )
-
                 valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
-                # if len(valid_answers) == 0:
-                #     pred[qid] = ""
-                # else:
-                #     pred[qid] = valid_answers[0]['text']
+                if len(valid_answers) == 0:
+                    pred[qid] = ""
+                else:
+                    pred[qid] = valid_answers[0]['text']
 
-                print('XLNET:')
-                print(valid_answers)
-
-                # Predicting based off max number of votes from all models.
-                ## Tie breaking condition is taking xlnet scores first (Better accuracy for now)
-                valid_answers_form = {pred['text'] : pred['score'] for pred in valid_answers}
-                valid_answers = list({pred['text'] for pred in valid_answers})
-                
-
-                predictions = []
-                for i in range(n_best_size):
-                    predictions.append(bert_pred[i]['answer'])
-                predictions += valid_answers
-                print('all preductions counted')
-                predictions = Counter(predictions)
-                fin = predictions.most_common()
-                max_counts = fin[0][1]
-
-                filtered_predictions = {pred : count for pred, count in predictions.items() if count == max_counts}
-                print(filtered_predictions)
-
-                pos = {}
-
-                for pred in filtered_predictions.keys():
-                    if pred in valid_answers_form.keys():
-                        pos[pred] = valid_answers_form[pred]
-                
-                if len(pos) == 0:
-                    for i in range(len(bert_pred)):
-                        if bert_pred[i]['answer'] in filtered_predictions.keys():
-                            pos[bert_pred[i]['answer']] = bert_pred[i]['confidence']
-                print(max(pos, key=pos.get))
-                break
-            break
+    return pred
 
 def main(args):
-    data = SquadDataset(args.data_path)
-    model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
-    checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
-    bilstm_model = BERT_BiLSTM(28,256,2,2).to(torch.device('cpu')) # Test inputs for now
-    model.load_state_dict(checkpoint["model_state_dict"])
-    ans = predict(data, model, bilstm_model ,20)
-    return ans
+    
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    print("Initialising RoBERTa Model")
+    model = RobertaForQuestionAnswering.from_pretrained('roberta-base').to(device)
+
+    if args.train:
+        train_path, model_path = args.data_path, args.model_path
+        squad_train = SquadDataset(train_path)
+
+        # specify hyperparameters
+        num_epoch = 2
+        batch_size = 16
+        learning_rate = 5e-5
+
+        # train the model
+        train(model=model, dataset=squad_train, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=model_path)
+    
+    if args.test:
+        test_path, model_path, output_path = args.data_path, args.model_path, args.output_path
+        print("Loading Saved Weights from Training")
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        squad_test = SquadDataset(test_path)
+
+        # specify hyperparameters
+        n_best_size = 20
+        max_answer_length = 30
+
+        # use trained model to make predictions
+        test_output = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
+    
+        # write model prediction into json file
+        with open(output_path, 'w') as f:
+            json.dump(test_output, f)
+
+        print('Model predictions saved in ', output_path)
+
 def get_arguments():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--train', default=False, action='store_true', help='train the model')
+    parser.add_argument('--test', default=False, action='store_true', help='test the model')
     parser.add_argument('--data_path', help='path to the dataset file')
-    parser.add_argument('--xlnet_model', help='path to xlnet model')
-    # parser.add_argument('--bilstm_model', help='path to bilstm model')
+    parser.add_argument('--model_path', help='path to save trained model')
+    parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
     return parser.parse_args()
 
 if __name__ == "__main__":

@@ -17,8 +17,8 @@ doc = "Victoria has a written constitution enacted in 1975, but based on the 185
 q = 'When did Victoria enact its constitution?'
 
 
-answer = model.predict(doc,q)
-
+answer = model.predict_full(doc,q)
+print(answer)
 # print(answer['answer'])
 # print(answer['answer'])
 # print(answer.keys())
