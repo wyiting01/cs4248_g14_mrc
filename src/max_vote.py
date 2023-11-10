@@ -10,8 +10,9 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
 import argparse
 import xlnet
-from bert.bert import QA
-from bert.utils import *
+import bert
+from bert import *
+import sys
 from bilstm_bert import *
 from collections import Counter
 
@@ -287,6 +288,7 @@ def get_arguments():
     return parser.parse_args()
 
 if __name__ == "__main__":
+    print(sys.path)
     args = get_arguments()
     main(args)
     print("Completed!")
