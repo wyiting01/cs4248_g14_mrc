@@ -14,7 +14,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
-import tensorflow as tf
 
 '''
 Need to install libraries for numpy, sklearn, transformers:
@@ -77,11 +76,11 @@ class biLSTMDataset(Dataset):
             self.spans = [span.split() for span in self.spans]
 
         # For debugging, something inherently wrong with current code.
-        self.contexts = self.contexts[:3]
-        self.questions = self.questions[:3]
-        self.answers = self.answers[:3]
-        self.spans = self.spans[:3]
-        self.question_ids = self.question_ids[:3]
+        #self.contexts = self.contexts[:5]
+        #self.questions = self.questions[:5]
+        #self.answers = self.answers[:5]
+        #self.spans = self.spans[:5]
+        #self.question_ids = self.question_ids[:5]
 
         # temp_zip = zip(self.contexts, self.questions)
         # max_length = max([len(zipped) for zipped in temp_zip])
@@ -166,15 +165,15 @@ class biLSTMDataset(Dataset):
                     token_end_index -= 1
                 self.end_positions.append(token_end_index + 1)
 
-            print(f"Processed question ID: {self.question_ids[sample_index]}")
-            print(f"Original context: {context}")
-            print(f"Original answer: {answer}")
-            print(f"Adjusted start_char_pos: {start_char_pos}, end_char_pos: {end_char_pos}")
-            print(f"Token start index: {token_start_index}, Token end index: {token_end_index}")
-            print(f"check offsets start: {offsets[token_start_index][0]}, offsets end: {offsets[token_end_index][1]}")
-            print(f"Token start position: {self.start_positions[-1]}, Token end position: {self.end_positions[-1]}")
-            print(f"Text from tokens: {' '.join(self.tokenizer.convert_ids_to_tokens(input_ids[self.start_positions[-1]:self.end_positions[-1]+1]))}")
-            print("Dataset initialisation complete.")
+            #print(f"Processed question ID: {self.question_ids[sample_index]}")
+            #print(f"Original context: {context}")
+            #print(f"Original answer: {answer}")
+            #print(f"Adjusted start_char_pos: {start_char_pos}, end_char_pos: {end_char_pos}")
+            #print(f"Token start index: {token_start_index}, Token end index: {token_end_index}")
+            #print(f"check offsets start: {offsets[token_start_index][0]}, offsets end: {offsets[token_end_index][1]}")
+            #print(f"Token start position: {self.start_positions[-1]}, Token end position: {self.end_positions[-1]}")
+            #print(f"Text from tokens: {' '.join(self.tokenizer.convert_ids_to_tokens(input_ids[self.start_positions[-1]:self.end_positions[-1]+1]))}")
+            #print("Dataset initialisation complete.")
 
     def __len__(self):
         return len(self.contexts)
@@ -561,18 +560,18 @@ def main(args):
 
     model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
 
-    x_train, y_train = extractAndMergeData(train_path)
+    #x_train, y_train = extractAndMergeData(train_path)
+
+    
+
+    #test_outputs, test_scores = split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
+    train_set = biLSTMDataset(train_path)
+
+    train(model, train_set, num_epoch=10, batch_size=16, device=device)
 
     test_set = biLSTMDataset(test_path)
-
-    test_outputs, test_scores = split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
-    # train_set = biLSTMDataset(train_path)
-
-    #train(model, train_set, num_epoch=10, batch_size=16, device=device)
     
-    #test_outputs = test(model, dataset=test_set, device=device)
-    #print(test_outputs)
-    # test_outputs, test_scores = test(model, dataset=test_set, device=device)
+    test_outputs, test_scores = test_eval(model, dataset=test_set, n_best_size = n_best_size, device=device)
 
     json.dump(test_outputs, open(output_path,"w"), ensure_ascii=False, indent=4)
     json.dump(test_scores, open(score_path,"w"), ensure_ascii=False, indent=4)
@@ -607,52 +606,58 @@ if __name__ == "__main__":
     main(args)
 
 
-# def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
-#     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-#     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-#     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
+def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
 
-#     start = datetime.datetime.now()
-#     for epoch in range(num_epoch):
-#         model.train()
-#         total_loss = 0
-#         for batch in data_loader:
-#             optimizer.zero_grad()
+    start = datetime.datetime.now()
+    for epoch in range(num_epochs):
+        model.train()
+        total_loss = 0.0
+        for step, batch in enumerate(train_loader, 0):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
             
-#             input_ids = batch["input_ids"].to(device)
-#             attention_mask = batch["attention_mask"].to(device)
+            start_positions = batch["start_positions"].to(device).long()
+            end_positions = batch["end_positions"].to(device).long()
+
+            optimizer.zero_grad()
+
+            start_logits, end_logits = model(input_ids, attention_mask)
+
+            print(f"Batch {i} - Start Positions: {start_positions}")
+            print(f"Batch {i} - End Positions: {end_positions}")
+            print("Start log:", start_logits)
+            print("End log:", end_logits)
+
+            start_loss = criterion(start_logits, start_positions)
+            end_loss = criterion(end_logits, end_positions)
+            loss = (start_loss + end_loss) / 2
+
+            loss.backward()
+
+            optimizer.step()
+
+            total_loss += loss.item() / len(train_loader)
             
-#             start_positions = batch["start_positions"].to(device)
-#             end_positions = batch["end_positions"].to(device)
-            
-#             # Forward pass
-#             start_logits, end_logits = model(input_ids, attention_mask)
+            if step % 100 == 99:
+                print('[%d, %5d] loss: %.3f' %
+                    (epoch + 1, step + 1, total_loss / 100))
+    end = datetime.datetime.now()
 
-#             # Compute loss and backpropagate
-#             start_loss = criterion(start_logits, start_positions)
-#             end_loss = criterion(end_logits, end_positions)
-#             loss = (start_loss + end_loss) / 2
+    checkpoint = {
+        'epoch': num_epoch,
+        'lr': learning_rate,
+        'batch_size': batch_size,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+    torch.save(checkpoint, model_path)
 
-#             loss.backward()
-#             optimizer.step()
-
-#             total_loss += loss.item()
-
-#             print(f"Epoch {epoch+1}/{num_epoch}, Loss: {total_loss/len(data_loader)}")
-#     end = datetime.datetime.now()
-
-#     checkpoint = {
-#         'epoch': num_epoch,
-#         'lr': learning_rate,
-#         'batch_size': batch_size,
-#         'model_state_dict': model.state_dict(),
-#         'optimizer_state_dict': optimizer.state_dict()
-#     }
-#     torch.save(checkpoint, model_path)
-
-#     print('Model saved in ', model_path)
-#     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
-#     return {'loss': total_loss/len(data_loader), 'status': STATUS_OK}
+    print('Model saved in ', model_path)
+    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
+    return {'loss': total_loss/len(data_loader), 'status': STATUS_OK}
 
 # def test(model, dataset, device='cpu'):
 #     model.eval()
