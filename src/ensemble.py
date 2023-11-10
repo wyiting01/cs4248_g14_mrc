@@ -184,7 +184,7 @@ def main(args):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
     n_best_size = 20
-    max_answer_length = 50
+    max_answer_length = 100
 
     # roberta
     print("Started on RoBERTa")

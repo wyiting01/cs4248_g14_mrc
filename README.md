@@ -22,12 +22,12 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 |  | Model | Exact | F1 |
 | ---- | ----- | ----- | -- |
 | BASELINE | BERT-SQuAD | 57.79564806054872 | 72.18288133527203 |
-| | RoBERTa | 81.20151371807 | <ins>**88.41621816924753**</ins> |
+| | RoBERTa | 81.20151371807 | 88.41621816924753 |
 | | XLNet | 75.34531693472091 | 84.06374401013184 |
 | | biLSTM | TBC | TBC | 
-| ENSEMBLE | Equal - Maximum | 78.9877010406811 | 86.7818746223915 |
-| | Equal - Multiplicative | 80.9176915799432 | 88.1576578932468 |
-| | Unequal - Optuna | <ins>**81.47587511825922**</ins> | 88.20920854244099
+| ENSEMBLE | Equal - Maximum | 78.89309366130558 | 86.70557785319596 |
+| | Equal - Multiplicative | <ins>**82.19489120151371**</ins> | <ins>**88.9101732833653**</ins> |
+| | Unequal - Optuna | 81.47587511825922 | 88.20920854244099
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
