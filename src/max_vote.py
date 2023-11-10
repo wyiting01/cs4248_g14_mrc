@@ -12,6 +12,8 @@ import argparse
 import xlnet
 from bert.bert import QA
 from bert.utils import *
+from bilstm_bert import *
+from collections import Counter
 
 torch.manual_seed(0)
 
@@ -161,7 +163,7 @@ class SquadDataset(Dataset):
         }
         return item_dict
 
-def predict(dataset, xlnet_model, n_best_size,device='cpu', max_answer_length = 30):
+def predict(dataset, xlnet_model, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
     print("Beginning Prediction")
     pred_data = DataLoader(dataset=dataset, batch_size=16, shuffle=False)
     bert = QA('bert/model')
@@ -183,10 +185,10 @@ def predict(dataset, xlnet_model, n_best_size,device='cpu', max_answer_length = 
 
             for i in range(len(input_ids)):
                 print(question[i])
-                bert_pred = bert.predict(context[i], question[i])
-                print('Bert:')
-                print(bert_pred)
+                # BERT MODEL
+                bert_pred = bert.predict_full(context[i], question[i])
 
+                # XLNET  Model
                 pred = {}
                 start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
                 end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
@@ -229,13 +231,43 @@ def predict(dataset, xlnet_model, n_best_size,device='cpu', max_answer_length = 
                             )
 
                 valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
-                if len(valid_answers) == 0:
-                    pred[qid] = ""
-                else:
-                    pred[qid] = valid_answers[0]['text']
+                # if len(valid_answers) == 0:
+                #     pred[qid] = ""
+                # else:
+                #     pred[qid] = valid_answers[0]['text']
 
                 print('XLNET:')
-                print(pred)
+                print(valid_answers)
+
+                # Predicting based off max number of votes from all models.
+                ## Tie breaking condition is taking xlnet scores first (Better accuracy for now)
+                valid_answers_form = {pred['text'] : pred['score'] for pred in valid_answers}
+                valid_answers = list({pred['text'] for pred in valid_answers})
+                
+
+                predictions = []
+                for i in range(n_best_size):
+                    predictions.append(bert_pred[i]['answer'])
+                predictions += valid_answers
+                print('all preductions counted')
+                predictions = Counter(predictions)
+                fin = predictions.most_common()
+                max_counts = fin[0][1]
+
+                filtered_predictions = {pred : count for pred, count in predictions.items() if count == max_counts}
+                print(filtered_predictions)
+
+                pos = {}
+
+                for pred in filtered_predictions.keys():
+                    if pred in valid_answers_form.keys():
+                        pos[pred] = valid_answers_form[pred]
+                
+                if len(pos) == 0:
+                    for i in range(len(bert_pred)):
+                        if bert_pred[i]['answer'] in filtered_predictions.keys():
+                            pos[bert_pred[i]['answer']] = bert_pred[i]['confidence']
+                print(max(pos, key=pos.get))
                 break
             break
 
@@ -243,13 +275,15 @@ def main(args):
     data = SquadDataset(args.data_path)
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
     checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
+    bilstm_model = BERT_BiLSTM(28,256,2,2).to(torch.device('cpu')) # Test inputs for now
     model.load_state_dict(checkpoint["model_state_dict"])
-    ans = predict(data, model, 20)
+    ans = predict(data, model, bilstm_model ,20)
     return ans
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--xlnet_model', help='path to xlnet model')
+    # parser.add_argument('--bilstm_model', help='path to bilstm model')
     return parser.parse_args()
 
 if __name__ == "__main__":

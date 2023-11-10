@@ -22,12 +22,12 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 |  | Model | Exact | F1 |
 | ---- | ----- | ----- | -- |
 | BASELINE | BERT-SQuAD | 57.79564806054872 | 72.18288133527203 |
-| | RoBERTa | 81.20151371807 | 88.41621816924753 |
+| | RoBERTa | 81.20151371807 | <ins>**88.41621816924753**</ins> |
 | | XLNet | 75.34531693472091 | 84.06374401013184 |
 | | biLSTM | TBC | TBC | 
 | ENSEMBLE | Equal - Maximum | 78.9877010406811 | 86.7818746223915 |
 | | Equal - Multiplicative | 80.9176915799432 | 88.1576578932468 |
-| | Unequal - Optuna | 81.47587511825922 | 88.20920854244099
+| | Unequal - Optuna | <ins>**81.47587511825922**</ins> | 88.20920854244099
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
@@ -144,61 +144,61 @@ To navigate around this rerpository, you can refer to the directory tree below:
 .
 ├── data
 |    ├── raw
-|        └── dev-v1.1.json
-|        └── train-v1.1.json
-|    ├── curated
-|        ├── ensemble_data
-|            ├── train
-|                 └── answer
-|                 └── answer_span
-|                 └── context
-|                 └── question
-|                 └── question_id
-|            ├── val
-|                 └── answer
-|                 └── answer_span
-|                 └── context
-|                 └── question
-|                 └── question_id
-|        ├── test_data
-|            └── answer
-|            └── answer_span
-|            └── context
-|            └── question
-|            └── question_id
-|        ├── training_data
-|            └── answer
-|            └── answer_span
-|            └── context
-|            └── question
-|            └── question_id
+|    |    ├── dev-v1.1.json
+|    |    └── train-v1.1.json
+|    └── curated
+|         ├── ensemble_data
+|         |    ├── train
+|         |    |    ├── answer
+|         |    |    ├── answer_span
+|         |    |    ├── context
+|         |    |    ├── question
+|         |    |    └── question_id
+|         |    └── val
+|         |         ├── answer
+|         |         ├── answer_span
+|         |         ├── context
+|         |         ├── question
+|         |         └── question_id
+|         ├── test_data
+|         |    ├── answer
+|         |    ├── answer_span
+|         |    ├── context
+|         |    ├── question
+|         |    └── question_id
+|         └── training_data
+|              ├── answer
+|              ├── answer_span
+|              ├── context
+|              ├── question
+|              └── question_id
 ├── model
-|    └── bert_squad.pt
-|    └── bilstm.pt
-|    └── roberta.pt
+|    ├── bert_squad.pt
+|    ├── bilstm.pt
+|    ├── roberta.pt
 |    └── xlnet.pt
 ├── output
-|    └── bert_squad_pred.json
-|    └── bilstm_pred.json
-|    └── ensemble_max_pred.json
-|    └── ensemble_mul_pred.json
-|    └── ensemble_optuna_pred.json
-|    └── ensemble_max_voting_pred.json
-|    └── robert_pred.json
+|    ├── bert_squad_pred.json
+|    ├── bilstm_pred.json
+|    ├── ensemble_max_pred.json
+|    ├── ensemble_mul_pred.json
+|    ├── ensemble_optuna_pred.json
+|    ├── ensemble_max_voting_pred.json
+|    ├── robert_pred.json
 |    └── xlnet_pred.json
 ├── src
-|    └── preprocessing.py
-|    └── evaluate-v2.0.py
+|    ├── preprocessing.py
+|    ├── evaluate-v2.0.py
 |    ├── baseline
-|        └── bilstm_bert.py
-|        └── bert_squad.py
-|        └── roberta.py
-|        └── xlnet.py
-|    ├── ensemble
-|        └── ensemble_equal_weighting.py
-|        └── ensemble_optuna.ipynb
-|        └── ensemble_unequal_optuna.py
-|        └── max_vote.py
+|    |    ├── bilstm_bert.py
+|    |    ├── bert_squad.py
+|    |    ├── roberta.py
+|    |    └── xlnet.py
+|    └── ensemble
+|         ├── ensemble_equal_weighting.py
+|         ├── ensemble_optuna.ipynb
+|         ├── ensemble_unequal_optuna.py
+|         └── max_vote.py
 └── README.md
 ```
 
