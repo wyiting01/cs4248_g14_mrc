@@ -201,7 +201,7 @@ class BERT_BiLSTM(nn.Module):
         self.num_layers = num_layers
         self.num_labels = num_labels
         
-        self.bert_encoder = BertModel.from_pretrained('bert-base-uncased')
+        self.bert_encoder = BertModel.from_pretrained('bert-base-cased')
         self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
         self.start_out = nn.Linear(hidden_dim * 2, 1)
         self.end_out = nn.Linear(hidden_dim * 2, 1)
