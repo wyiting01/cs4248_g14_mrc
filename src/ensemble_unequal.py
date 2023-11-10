@@ -25,6 +25,8 @@ import string
 import collections
 import optuna
 import ijson
+import math
+import heapq
 
 import torch
 import torch.nn as nn
@@ -150,17 +152,29 @@ def test_xlnet(model, dataset, n_best_size=20, device='cpu') -> dict:
 
 accs = [0.88, 0.79, 0.87]
 
-def calc_weights(acc, a):
-    return acc ** a # fixed alpha value of 4
+def calc_autotune_alpha(accs: list) -> int:
+    '''
+    Calculates appropriate alpha for the autotuning weighting method,
+    which is taking the floor of the root difference between the 2 models with largest accuracies.
+    '''
+    if len(accs) < 2:
+        raise ValueError("The list of accuracies must contain at least two elements.")
 
-def aggregate_predictions_fixed(all_preds: dict, alpha: int, accs: list) -> dict:
+    largest, second_largest = heapq.nlargest(2, accs)
+    diff = largest - second_largest
+    root_diff = math.sqrt(diff)
+    alpha = math.floor(root_diff)
+
+    return alpha
+
+def aggregate_predictions(all_preds: dict, alpha: int, accs: list) -> dict:
     """ Aggregate predictions from all models. """
 
     weights = [acc**alpha for acc in accs]
 
     aggregated_preds = {}
-    for question, preds in all_preds[0].items():  # Initialize strcuture
-        aggregated_preds[question] = {pos: {} for pos in preds.keys()}
+    for qid, preds in all_preds[0].items():  # Initialize strcuture fst
+        aggregated_preds[qid] = {pos: {} for pos in preds.keys()}
 
     for i, model_preds in enumerate(all_preds):
         weight = weights[i]
@@ -175,54 +189,22 @@ def aggregate_predictions_fixed(all_preds: dict, alpha: int, accs: list) -> dict
     # Normalize Ps and Pe for each char position
     for qid, pos in aggregated_preds.items():
         for pos_type in pos.keys():
-            total_prob = sum(aggregated_preds[question][pos_type].values())
+            total_prob = sum(aggregated_preds[qid][pos_type].values())
             for pos in aggregated_preds[qid][pos_type]:
                 aggregated_preds[qid][pos_type][pos] /= total_prob
+            aggregated_preds[qid]['answers'] = all_preds[qid]['answers']
+            aggregated_preds[qid]['context'] = all_preds[qid]['contexts']
 
     return aggregated_preds
 
-def weighting_score(xlnet, roberta, w1, w2):
-    wdict  = {}
-    for qns_id in xlnet.keys():
-        xlnet_ans_start = xlnet.get(qns_id).get('start')
-        roberta_ans_start = roberta.get(qns_id).get('start')
-        ans = roberta.get(qns_id).get('answers')
-        ctxt = roberta.get(qns_id).get('context')
-
-        weighted_ans_start = {}
-
-        for key, val in roberta_ans_start.items(): # start w xlnet as it has less candidates
-            #roberta_score = roberta_ans_start.get(key)
-            xlnet_score = xlnet_ans_start.get(key)
-            if xlnet_score == None:
-                weighted_ans_start[key] = w2*float(val)
-            else:
-                 weighted_ans_start[key] = w1*float(xlnet_score) + w2*float(val)
-
-        xlnet_ans_end = xlnet.get(qns_id).get('end')
-        roberta_ans_end = roberta.get(qns_id).get('end')
-        
-        weighted_ans_end = {}
-
-        for key, val in roberta_ans_end.items(): # start w xlnet as it has less candidates
-            #roberta_score = roberta_ans_end.get(key)
-            xlnet_score = xlnet_ans_end.get(key)
-            if xlnet_score == None:
-                weighted_ans_end[key] = w2*float(val)
-            else:
-                weighted_ans_end[key] = w1*float(xlnet_score) + w2*float(val)
-        wdict[qns_id] = {"start": weighted_ans_start, "end": weighted_ans_end, "context": ctxt, "answer": ans}
-    return wdict
-
 def post_processing(score_dict, max_answer_length=100):
     pred = {}
-    for qid in score_dict.keys():
-        ans = score_dict.get(qid).get('answer')
-        ctxt = score_dict.get(qid).get('context')
-        #print(ctxt)
+    for qns in score_dict.keys():
+        ans = score_dict.get(qns).get('answer')
+        ctxt = score_dict.get(qns).get('context')
         valid_answer = {}
-        start_indexes = score_dict.get(qid)["start"]
-        end_indexes = score_dict.get(qid)["end"]
+        start_indexes = score_dict.get(qns)["start"]
+        end_indexes = score_dict.get(qns)["end"]
         for start, s_score in start_indexes.items():
             for end, e_score in end_indexes.items():
                 start = int(start)
@@ -237,14 +219,15 @@ def post_processing(score_dict, max_answer_length=100):
                                 {pred_answer : pred_score}
                             )
 
-        valid_answes = dict(sorted(valid_answer.items(), key=lambda x: x[1], reverse=True))
+        valid_answer = dict(sorted(valid_answer.items(), key=lambda x: x[1], reverse=True))
         #print(valid_answer)
         if len(valid_answer) == 0:
-            pred[qid] = ""
+            print(qns, ans, valid_answer)
+            pred[qns] = (" ", ans)
+            
         else:
-            pred[qid] = next(iter(valid_answer))
+            pred[qns] = (next(iter(valid_answer)), ans)
     return pred
-
 
 def main(args):
     
@@ -304,13 +287,17 @@ def main(args):
         f2 = open(args.roberta_dict)
         roberta_pred = json.load(f2)
 
-        
-        print("Doing weighting on xlnet and roberta")
-        weighted_score_dict = weighting_score(xlnet_pred, roberta_pred, float(args.xlnet_weight), float(args.roberta_weight))
-        final_pred = post_processing(weighted_score_dict)
 
-        with open(args.output_path, 'w') as f:
-            json.dump(final_pred, f)
+        print("Doing weighting on xlnet and roberta")
+        weighted_prob_fixed = 0 # alpha = 4
+        weighted_prob_auto = 0
+        weighted_prob_equal = 0 # alpha = 0
+
+        # weighted_score_dict = weighting_score(xlnet_pred, roberta_pred, float(args.xlnet_weight), float(args.roberta_weight))
+        # final_pred = post_processing(weighted_score_dict)
+
+        # with open(args.output_path, 'w') as f:
+        #     json.dump(final_pred, f)
 
 def get_arguments():
     parser = argparse.ArgumentParser()
