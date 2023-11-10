@@ -559,10 +559,12 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
 
             start_logits, end_logits = model(input_ids, attention_mask)
 
-            print(f"Batch {batch} - Start Positions: {start_positions}")
-            print(f"Batch {batch} - End Positions: {end_positions}")
-            print("Start log:", start_logits)
-            print("End log:", end_logits)
+            # Can't print everything or super big file.
+            if step == 0 :
+                print(f"Batch {batch} - Start Positions: {start_positions}")
+                print(f"Batch {batch} - End Positions: {end_positions}")
+                print("Start log:", start_logits)
+                print("End log:", end_logits)
 
             start_loss = criterion(start_logits, start_positions)
             end_loss = criterion(end_logits, end_positions)
@@ -620,7 +622,8 @@ def main(args):
     #test_outputs, test_scores = split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
     train_set = biLSTMDataset(train_path)
 
-    train(model, train_set, num_epoch=10, batch_size=16, device=device)
+    train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
+    #train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
 
     test_set = biLSTMDataset(test_path)
     
