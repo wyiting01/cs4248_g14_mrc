@@ -616,11 +616,19 @@ def get_full_answer(example, features, all_results, n_best_size,
 
     answer = {}
 
-    for i in range(len(probs)):
+    for i in range(n_best_size):
         answer[i] = {"answer" : nbest[i].text,
                "start" : nbest[i].start_index,
                "end" : nbest[i].end_index,
                "confidence" : probs[i],
                "document" : example.doc_tokens
              }
+
+    # for i in range(len(probs)):
+    #     answer[i] = {"answer" : nbest[i].text,
+    #            "start" : nbest[i].start_index,
+    #            "end" : nbest[i].end_index,
+    #            "confidence" : probs[i],
+    #            "document" : example.doc_tokens
+    #          }
     return answer
