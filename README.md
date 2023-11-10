@@ -139,7 +139,7 @@ python ensemble_unequal_optuna.py --test --xlnet_dict "../ensemble/xlnet_test.js
 > Note that training of both models (as well as getting candidates) cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
 
 ## Directory Structure
-To navigate around this rerpository, you can refer to the directory tree below:
+To navigate around this repository, you can refer to the directory tree below:
 ```
 .
 ├── data
