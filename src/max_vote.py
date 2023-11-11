@@ -10,8 +10,9 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
 import argparse
 import xlnet
-import bert
-from bert import *
+# import bert
+# from bert import *
+from bert.bert_model import QA
 import sys
 from bilstm_bert import *
 from collections import Counter
