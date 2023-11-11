@@ -83,6 +83,7 @@ python src/bilstm_bert.py --train --train_path data/curated/training_data/ --mod
 
 # testing:
 python src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path bilstm.pt
+```
 
 ## Ensemble Models
 
