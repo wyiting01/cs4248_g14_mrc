@@ -18,6 +18,7 @@ from collections import Counter
 
 torch.manual_seed(0)
 
+#### XLNET FUNCTIONS ####
 class SquadDataset(Dataset):
 
     def __init__(self, input_path):
@@ -164,10 +165,142 @@ class SquadDataset(Dataset):
         }
         return item_dict
 
-def predict(dataset, xlnet_model, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
+#### biLSTM FUNCTIONS ####
+class biLSTMDataset(Dataset):
+    def __init__(self, in_path=None, x=None, y=None):
+        print("Initialising dataset...")
+        self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-cased')
+
+        if in_path != None:
+            contexts = read_content(f"{in_path}/context")
+            questions = read_content(f"{in_path}/question")
+            answers = read_content(f"{in_path}/answer")
+            spans = read_content(f"{in_path}/answer_span")
+            question_ids = read_content(f"{in_path}/question_id")
+
+            self.contexts = [ctx.strip() for ctx in contexts]
+            self.questions = [qn.strip() for qn in questions]
+            self.answers = [ans.strip() for ans in answers]
+            self.spans = [span.strip().split() for span in spans]
+            self.question_ids = [qn_id.strip() for qn_id in question_ids]
+        else:
+            self.contexts, self.questions, self.question_ids = zip(*x)
+            self.answers, self.spans = zip(*y)
+            
+            # Initially cannot split because of how k fold works.
+            self.spans = [span.split() for span in self.spans]
+
+        self.encodings = self.tokenizer(self.questions,
+                                        self.contexts,
+                                        padding="max_length",
+                                        max_length=384,
+                                        stride=128,
+                                        return_tensors="pt",
+                                        truncation="only_second",
+                                        add_special_tokens=True,
+                                        return_overflowing_tokens=True,
+                                        return_offsets_mapping=True
+                                        )
+        
+        self.start_positions = []
+        self.end_positions = []
+        self.sample_mapping = self.encodings.pop("overflow_to_sample_mapping")
+        self.offset_mapping = self.encodings.pop("offset_mapping")
+
+        for i, offsets in enumerate(self.offset_mapping):
+            input_ids = self.encodings["input_ids"][i].tolist()
+            cls_index = input_ids.index(self.tokenizer.cls_token_id)
+            sequence_ids = self.encodings["token_type_ids"][i]
+            attention_mask = self.encodings["attention_mask"][i]
+
+            sample_index = self.sample_mapping[i]
+            context = self.contexts[sample_index]
+            answer = self.answers[sample_index]
+            start_char_pos, end_char_pos = map(int, self.spans[sample_index])
+
+            # To adjust answer spans that might be off by one or two characters
+            if context[start_char_pos:end_char_pos] != answer and context[start_char_pos-1:end_char_pos-1] == answer:
+                start_char_pos -= 1
+                end_char_pos -= 1
+            elif context[start_char_pos-2:end_char_pos-2] == answer:
+                start_char_pos -= 2
+                end_char_pos -= 2
+
+            # To find start and end of context
+            token_start_index = 0
+            while sequence_ids[token_start_index] != 1:
+                token_start_index += 1
+
+            token_end_index = len(input_ids) - 1
+            # sequence_ids will be None for [PAD]
+            while token_end_index >= 0 and attention_mask[token_end_index] == 0:
+                token_end_index -= 1
+            # skip over the [SEP]
+            if token_end_index >= 0 and input_ids[token_end_index] == self.tokenizer.sep_token_id:
+                token_end_index -= 1
+
+            # To find answers that are out of the span
+            if not (offsets[token_start_index][0] <= start_char_pos and offsets[token_end_index][1] >= end_char_pos):
+                self.start_positions.append(cls_index)
+                self.end_positions.append(cls_index)
+            else:
+                while token_start_index < len(offsets) and offsets[token_start_index][0] <= start_char_pos:
+                    token_start_index += 1
+                self.start_positions.append(token_start_index - 1)
+
+                while offsets[token_end_index][1] >= end_char_pos:
+                    token_end_index -= 1
+                self.end_positions.append(token_end_index + 1)
+
+    def __len__(self):
+        return len(self.contexts)
+    
+    def __getitem__(self, i):
+        idx_i = self.sample_mapping[i]
+
+        item = {
+            "input_ids": self.encodings["input_ids"][i],
+            "attention_mask": self.encodings["attention_mask"][i],
+            "start_position": self.start_positions[i],
+            "end_position": self.end_positions[i],
+            "question_ids": self.question_ids[idx_i],
+            "contexts": self.contexts[idx_i],
+            "offset_mappings": self.offset_mapping[i]
+        }
+        return item
+
+class BERT_BiLSTM(nn.Module):   
+    def __init__(self, hidden_dim):
+        super(BERT_BiLSTM, self).__init__()
+        self.hidden_dim = hidden_dim
+        
+        self.bert_encoder = BertModel.from_pretrained('bert-base-cased')
+        self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
+        self.start_out = nn.Linear(hidden_dim * 2, 1)
+        self.end_out = nn.Linear(hidden_dim * 2, 1)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.relu = nn.ReLU()
+
+    def forward(self, input_ids, attention_mask):
+        bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
+
+        lstm_out, _ = self.lstm(bert_outputs['last_hidden_state'])
+
+        relu = self.relu(lstm_out)
+        dropout_out = self.dropout(relu)
+
+        start_logits = torch.abs(self.start_out(dropout_out)).squeeze(-1)
+        end_logits = torch.abs(self.end_out(dropout_out)).squeeze(-1)
+        
+        return start_logits, end_logits
+
+#### START OF PREDICTION ####
+def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
     print("Beginning Prediction")
-    pred_data = DataLoader(dataset=dataset, batch_size=16, shuffle=False)
+    pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
     bert = QA('bert/model')
+
+    bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
     
     with torch.no_grad():
         for data in pred_data:
@@ -276,15 +409,17 @@ def main(args):
     data = SquadDataset(args.data_path)
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
     checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
-    bilstm_model = BERT_BiLSTM(28,256,2,2).to(torch.device('cpu')) # Test inputs for now
+    bilstm_dataset = biLSTMDataset(in_path=args.data_path)
+    bilstm_model = BERT_BiLSTM(64).to(torch.device('cpu'))
     model.load_state_dict(checkpoint["model_state_dict"])
-    ans = predict(data, model, bilstm_model ,20)
+    ans = predict(data, model, bilstm_dataset, bilstm_model, 20)
     return ans
+
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--xlnet_model', help='path to xlnet model')
-    # parser.add_argument('--bilstm_model', help='path to bilstm model')
+    parser.add_argument('--bilstm_model', help='path to bilstm model')
     return parser.parse_args()
 
 if __name__ == "__main__":
