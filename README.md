@@ -78,10 +78,10 @@ python src/xlnet.py --test --data_path "data/curated/test_data" --model_path "mo
 - Model: biLSTM-BERT
 
 # training:
-python src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path bilstm.pt
+python src/bilstm_bert.py --train --train_path "data/curated/training_data/" --model_path "model/bilstm.pt"
 
 # testing:
-python src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path bilstm.pt
+python src/bilstm_bert.py --test --test_path "data/curated/test_data/" --model_path "model/bilstm.pt"
 
 
 ## Ensemble Models

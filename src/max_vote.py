@@ -13,7 +13,8 @@ from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
 
-from bert import *
+#from bert import *
+#from bert.bert import *
 from bilstm_bert import biLSTMDataset, BERT_BiLSTM
 from collections import Counter
 from xlnet import SquadDataset
@@ -42,7 +43,7 @@ torch.manual_seed(0)
 def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
     print("Beginning Prediction")
     pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
-    bert = QA('bert/model')
+    #bert = QA('bert/model')
 
     bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
     
@@ -66,7 +67,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
             for i in range(len(input_ids)):
                 print(question[i])
                 # BERT MODEL
-                bert_pred = bert.predict_full(context[i], question[i])
+                #bert_pred = bert.predict_full(context[i], question[i])
 
                 # XLNET  Model
                 pred = {}
@@ -126,8 +127,8 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
                 
 
                 predictions = []
-                for i in range(n_best_size):
-                    predictions.append(bert_pred[i]['answer'])
+                #for i in range(n_best_size):
+                #    predictions.append(bert_pred[i]['answer'])
                 predictions += valid_answers
                 print('all predictions counted')
                 predictions = Counter(predictions)
@@ -143,10 +144,10 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
                     if pred in valid_answers_form.keys():
                         pos[pred] = valid_answers_form[pred]
                 
-                if len(pos) == 0:
-                    for i in range(len(bert_pred)):
-                        if bert_pred[i]['answer'] in filtered_predictions.keys():
-                            pos[bert_pred[i]['answer']] = bert_pred[i]['confidence']
+                #if len(pos) == 0:
+                #    for i in range(len(bert_pred)):
+                #        if bert_pred[i]['answer'] in filtered_predictions.keys():
+                #            pos[bert_pred[i]['answer']] = bert_pred[i]['confidence']
                 print(max(pos, key=pos.get))
                 break
             break
