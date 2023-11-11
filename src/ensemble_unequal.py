@@ -180,6 +180,8 @@ def aggregate_predictions(all_preds: dict, alpha: int, accs: list) -> dict:
         weight = weights[i]
         for qid, pos in model_preds.items():
             for pos_type, pos_preds in pos.items(): # start, {scores}
+                if pos_type == "answers" or pos_type == "context":
+                    continue
                 for char_pos, prob in pos_preds.items(): # char pos, prob
                     if char_pos in aggregated_preds[qid][pos_type]:
                         aggregated_preds[qid][pos_type][char_pos] += prob * weight
@@ -192,8 +194,8 @@ def aggregate_predictions(all_preds: dict, alpha: int, accs: list) -> dict:
             total_prob = sum(aggregated_preds[qid][pos_type].values())
             for pos in aggregated_preds[qid][pos_type]:
                 aggregated_preds[qid][pos_type][pos] /= total_prob
-            aggregated_preds[qid]['answers'] = all_preds[qid]['answers']
-            aggregated_preds[qid]['context'] = all_preds[qid]['contexts']
+            aggregated_preds[qid]['answers'] = all_preds[0][qid]['answers']
+            aggregated_preds[qid]['context'] = all_preds[0][qid]['contexts']
 
     return aggregated_preds
 
