@@ -73,16 +73,17 @@ python src/xlnet.py --train --data_path "data/curated/training_data" --model_pat
 python src/xlnet.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/xlnet_pred.json"
 ```
 
-### 3. biLSTM
+### 4. biLSTM
 - Script: `src/bilstm_bert.py`
 - Model: biLSTM-BERT
 
+```
 # training:
 python src/bilstm_bert.py --train_path data/curated/training_data/ --model_path bilstm.pt
 
 # testing:
 python src/bilstm_bert.py --test_path data/curated/test_data/
-
+```
 
 ## Ensemble Models
 
