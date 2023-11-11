@@ -216,7 +216,8 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
     test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
 
-    pred = {}
+    pred_all = {}
+    pred_top = {}
 
     print("Making Predictions on Test Dataset")
     with torch.no_grad():
@@ -247,7 +248,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 ctxt = context[i]
                 qid = qids[i]
 
-                valid_answers = []
+                valid_answers = {}
                 for start in start_indexes:
                     for end in end_indexes:
                         start_index = start_top_indexes[start]
@@ -268,20 +269,20 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                         if start_index <= end_index:
                             start_char = offsets[start_index][0]
                             end_char = offsets[end_index][1]
-                            valid_answers.append(
-                                {
-                                    "score": start_logits[start] + end_logits[end],
-                                    "text": ctxt[start_char: end_char]
-                                }
-                            )
+                            pred_answer = ctxt[start_char: end_char] 
+                            pred_score = start_logits[start] + end_logits[end]
+                            if valid_answers.get(pred_answer) == None or float(valid_answers.get(pred_answer)) < pred_score:
+                                valid_answers[pred_answer] = str(pred_score)
 
-                valid_answers = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[:n_best_size]
+                valid_answers = dict(sorted(valid_answers.items(), key=lambda x: float(x[1]), reverse=True)[:n_best_size])
                 if len(valid_answers) == 0:
-                    pred[qid] = ""
+                    pred_all[qid] = ""
+                    pred_top[qid] = {}
                 else:
-                    pred[qid] = valid_answers[0]['text']
+                    pred_all[qid] = valid_answers
+                    pred_top[qid] = next(iter(valid_answers))
 
-    return pred
+    return pred_all, pred_top
 
 def main(args):
     
@@ -313,11 +314,14 @@ def main(args):
         max_answer_length = 30
 
         # use trained model to make predictions
-        test_output = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
+        pred_all, pred_top = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
     
         # write model prediction into json file
-        with open(output_path, 'w') as f:
-            json.dump(test_output, f)
+        with open(output_path + "/xlnet_pred_all.json", 'w') as f:
+            json.dump(pred_all, f)
+
+        with open(output_path + "/xlnet_pred_top.json", 'w') as f:
+            json.dump(pred_top, f)
 
         print('Model predictions saved in ', output_path)
 
