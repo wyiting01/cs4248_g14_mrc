@@ -16,8 +16,9 @@ from transformers import BertTokenizerFast, BertModel
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 
 '''
-Need to install libraries for numpy, sklearn, transformers:
+Need to install libraries for hyperopt, numpy, sklearn, transformers:
 
+pip install hyperopt
 pip install numpy
 pip install torch
 pip install -U scikit-learn
