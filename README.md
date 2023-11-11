@@ -34,7 +34,7 @@ python xlnet.py --test --data_path "../data/curated/test_data" --model_path "./x
 ```
 
 ### 3. biLSTM
-- Script: ``
-- Model:
+- Script: python3 src/bilstm_bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path bilstm.pt
+- Model: biLSTM-BERT
 
 ## Ensemble Models
