@@ -150,8 +150,6 @@ def test_xlnet(model, dataset, n_best_size=20, device='cpu') -> dict:
 
     return pred
 
-accs = [0.88, 0.79, 0.87]
-
 def calc_autotune_alpha(accs: list) -> int:
     '''
     Calculates appropriate alpha for the autotuning weighting method,
@@ -284,22 +282,40 @@ def main(args):
                 json.dump(xlnet_pred, f)
     
     elif args.test:
+        output_path = args.output_path
+
+        # all models 
         f1 = open(args.xlnet_dict)
         xlnet_pred = json.load(f1)
         f2 = open(args.roberta_dict)
         roberta_pred = json.load(f2)
 
+        all_preds = 
 
-        print("Doing weighting on xlnet and roberta")
-        weighted_prob_fixed = 0 # alpha = 4
-        weighted_prob_auto = 0
-        weighted_prob_equal = 0 # alpha = 0
+        a1 = open(args.xlnet_dict)
+        xlnet_acc = json.load(a1)
+        a2 = open(args.roberta_dict)
+        roberta_acc = json.load(a2)
 
-        # weighted_score_dict = weighting_score(xlnet_pred, roberta_pred, float(args.xlnet_weight), float(args.roberta_weight))
-        # final_pred = post_processing(weighted_score_dict)
+        accs = [xlnet_acc, roberta_acc, 0.87]
 
-        # with open(args.output_path, 'w') as f:
-        #     json.dump(final_pred, f)
+        fixed_alpha = 4
+        auto_alpha = calc_autotune_alpha(accs)
+        equal_alpha = 0
+
+        print("Doing weighting on provided models")
+        weighted_prob_fixed = aggregate_predictions(all_preds, fixed_alpha, accs)
+        weighted_prob_auto = aggregate_predictions(all_preds, auto_alpha, accs)
+        weighted_prob_equal = aggregate_predictions(all_preds, equal_alpha, accs)
+
+        fixed_pred = post_processing(weighted_prob_fixed)
+        auto_pred = post_processing(weighted_prob_auto)
+        equal_pred = post_processing(weighted_prob_equal)
+
+        json.dump(fixed_pred, open(output_path+"/unequal_weight_fixed_pred.json","w"), ensure_ascii=False, indent=4)
+        json.dump(auto_pred, open(output_path+"/unequal_weight_auto_pred.json","w"), ensure_ascii=False, indent=4)
+        json.dump(equal_pred, open(output_path+"/unequal_weight_equal_pred.json","w"), ensure_ascii=False, indent=4)
+        print('\nSuccessful json dump!')
 
 def get_arguments():
     parser = argparse.ArgumentParser()
