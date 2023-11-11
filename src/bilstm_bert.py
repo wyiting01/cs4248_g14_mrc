@@ -24,7 +24,12 @@ pip install torch
 pip install -U scikit-learn
 pip install transformers
 
-To run, use command: python3 src/bilstm_bert.py --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path bilstm.pt
+(From main folder cs4248_g14_mrc)
+To train, use command:
+python src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path bilstm.pt
+
+To test, use command:
+python src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path bilstm.pt
 '''
 
 # Default hyperparameters
@@ -239,10 +244,10 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
                 start_logits, end_logits = model(input_ids, attention_mask)
 
-                print(f"Batch {i} - Start Positions: {start_positions}")
-                print(f"Batch {i} - End Positions: {end_positions}")
-                print("Start log:", start_logits)
-                print("End log:", end_logits)
+                #print(f"Batch {i} - Start Positions: {start_positions}")
+                #print(f"Batch {i} - End Positions: {end_positions}")
+                #print("Start log:", start_logits)
+                #print("End log:", end_logits)
 
                 start_loss = criterion(start_logits, start_positions)
                 end_loss = criterion(end_logits, end_positions)
@@ -307,8 +312,8 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
 
             start_logits = start_logits.cpu().detach().numpy() #grad included
             end_logits = end_logits.cpu().detach().numpy()
-            print("Shape of start_logits:", start_logits.shape)
-            print("Shape of end_logits:", end_logits.shape)
+            #print("Shape of start_logits:", start_logits.shape)
+            #print("Shape of end_logits:", end_logits.shape)
 
             for i in range(len(input_ids)):
                 qid = question_ids[i]
@@ -484,8 +489,8 @@ def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
 
                 start_logits = start_logits.cpu().detach().numpy() #grad included
                 end_logits = end_logits.cpu().detach().numpy()
-                print("Shape of start_logits:", start_logits.shape)
-                print("Shape of end_logits:", end_logits.shape)
+                #print("Shape of start_logits:", start_logits.shape)
+                #print("Shape of end_logits:", end_logits.shape)
 
                 for i in range(len(input_ids)):
                     qid = question_ids[i]
@@ -535,26 +540,33 @@ def main(args):
 
     model = BERT_BiLSTM(hidden_dim).to(device)
 
-    #test_outputs, test_scores = split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
-    train_set = biLSTMDataset(train_path)
+    if args.train:
+        #test_outputs, test_scores = split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
+        train_set = biLSTMDataset(train_path)
 
-    train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
+        train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
 
-    test_set = biLSTMDataset(test_path)
+    if args.test:
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+
+        test_set = biLSTMDataset(test_path)
     
-    test_outputs, test_scores = test_eval(model, dataset=test_set, n_best_size = n_best_size, device=device)
+        test_outputs, test_scores = test_eval(model, dataset=test_set, n_best_size = n_best_size, device=device)
 
-    json.dump(test_outputs, open(output_path,"w"), ensure_ascii=False, indent=4)
-    json.dump(test_scores, open(score_path,"w"), ensure_ascii=False, indent=4)
-    print('\nSuccessful json dump!')
+        json.dump(test_outputs, open(output_path,"w"), ensure_ascii=False, indent=4)
+        json.dump(test_scores, open(score_path,"w"), ensure_ascii=False, indent=4)
+        print('\nSuccessful json dump!')
 
     print('\n==== All done ====')
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_path', required=True, help='path to the training datasets')
-    parser.add_argument('--test_path', required=True, help='path to the test datasets')
-    parser.add_argument('--model_path', required=True, help='path to where the model is saved')
+    parser.add_argument('--train', default=False, action='store_true', help='train the model')
+    parser.add_argument('--test', default=False, action='store_true', help='test the model')
+    parser.add_argument('--train_path', help='path to the training datasets')
+    parser.add_argument('--test_path', help='path to the test datasets')
+    parser.add_argument('--model_path', help='path to where the model is saved')
     parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
     parser.add_argument('--score_path', default="scores.json", help='path to model scores')
 
