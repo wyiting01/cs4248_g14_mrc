@@ -1,19 +1,20 @@
 import argparse
 import datetime
-from itertools import islice
-import numpy as np
 import json
-import sys
+import numpy as np
 import random
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+
+from hyperopt import STATUS_OK
+from itertools import islice
 from sklearn.model_selection import KFold
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
-from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 
 '''
 Need to install libraries for hyperopt, numpy, sklearn, transformers:
