@@ -4,169 +4,108 @@ import json
 import numpy as np
 import torch
 import torch.nn as nn
+import argparse
+import sys
 import torch.nn.functional as F
+import xlnet
+
 from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
-import argparse
-import xlnet
-from bert.bert import QA
-from bert.utils import *
+
+from bert.bert_model import QA
+from bilstm_bert import *
+from collections import Counter
+from xlnet import SquadDataset
+
+'''
+Need to install libraries for hyperopt, numpy, sklearn, transformers, BERT:
+
+pip install hyperopt
+pip install numpy
+pip install torch
+pip install -U scikit-learn
+pip install transformers
+pip install pytorch_transformers
+
+(From main folder cs4248_g14_mrc)
+
+To run this file, use the command:
+(delete rows below, currently not all in) python src/max_vote.py --data_path data/curated/test_data --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt
+
+Current: python src/max_vote.py --data_path data/curated/test_data
+'''
 
 torch.manual_seed(0)
 
-class SquadDataset(Dataset):
-
-    def __init__(self, input_path):
-        """
-        input_path: path that contains all the files - contexts, questions, answers, answer spans and question ids
-        """
-        print(f"Reading in Dataset from {input_path}")
-        
-        with open(input_path + "/context", encoding='utf-8') as f:
-            contexts = f.read().split("\t")
-        with open(input_path + "/question", encoding='utf-8') as f:
-            questions = f.read().split("\t")
-        with open(input_path + "/answer", encoding='utf-8') as f:
-            answers = f.read().split("\t")
-        with open(input_path + "/answer_span", encoding='utf-8') as f:
-            spans = f.read().split("\t")
-        with open(input_path + "/question_id", encoding='utf-8') as f:
-            qids = f.read().split("\t")
-
-        self.contexts = [ctx.strip() for ctx in contexts]
-        self.questions = [qn.strip() for qn in questions]
-        self.answers = [ans.strip() for ans in answers]
-        self.spans = [span.strip().split() for span in spans]
-        self.start_indices = [int(x[0]) for x in self.spans]
-        self.end_indices = [int(x[1]) for x in self.spans]
-        self.qids = [qid.strip() for qid in qids]
-
-        # intialise XLNetTokenizerFast for input tokenization
-        self.tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
-        self.tokenizer.padding_side = "right"
-
-        # extract tokenization outputs
-        self.tokenizer_dict = self.tokenize()
-        self.sample_mapping, self.offset_mapping = self.preprocess()
-
-        self.input_ids = self.tokenizer_dict["input_ids"]
-        self.token_type_ids = self.tokenizer_dict["token_type_ids"]
-        self.attention_mask = self.tokenizer_dict["attention_mask"]
-
-
-    def tokenize(self, max_length=384, doc_stride=128):
-        """
-        inputs:
-        1. max_length: specifies the length of the tokenized text
-        2. doc_stride: defines the number of overlapping tokens
-
-        output:
-        1. tokenizer_dict, which contains
-        - input_ids: list of integer values representing the tokenized text; each integer corresponds to a specific token
-        - token_type_ids: to distinguish between question and context
-        - attention_mask: a binary mask that tells the model which tokens to mask/not mask
-        - sample_mapping: map from a feature to its corresponding example, since one question-context pair might give several features
-        - offset_mapping: maps each input id with the corresponding start and end characters in the original text
-
-        Tokenize examples (question-context pairs) with truncation and padding, but keep the overflows using a stride specified by `doc_stride`. 
-        When the question-context input exceeds the `max_length`, it will contain more than one feature, and each of these features will have context
-        that overlaps a bit with the previous features, and the overlapping is determined by `doc_stride`. This is to ensure that although truncation
-        is performed, these overflows will ensure that no answer is missed as long as the answer span is shorter than the length of the overlap.
-        """
-        print("Performing tokenization on dataset")
-        tokenizer_dict = self.tokenizer(
-            self.questions,
-            self.contexts,
-            truncation="only_second",
-            padding="max_length",
-            max_length=max_length,
-            stride=doc_stride,
-            return_overflowing_tokens=True,
-            return_offsets_mapping=True
-        )
-        return tokenizer_dict
-
-    def preprocess(self):
-        """
-        This functions is to preprocess the outputs of the tokenizer dictionary.
-        Due to the possibility that an example has multiple features, this functions ensure that the start_positions and end_positions are mapped
-        correctly
-        """
-        print("Preprocessing Dataset")
-
-        sample_mapping = self.tokenizer_dict.pop("overflow_to_sample_mapping")
-        offset_mapping = self.tokenizer_dict.pop("offset_mapping")
-
-        self.tokenizer_dict["start_positions"] = []
-        self.tokenizer_dict["end_positions"] = []
-
-        for i, offsets in enumerate(offset_mapping):
-            input_ids = self.tokenizer_dict["input_ids"][i]
-            cls_index = input_ids.index(self.tokenizer.cls_token_id)
-            sequence_ids = self.tokenizer_dict.sequence_ids(i)
-
-            sample_index = sample_mapping[i]
-            answer = self.answers[sample_index]
-            start_char = self.start_indices[sample_index]
-            end_char = self.end_indices[sample_index]
-
-            token_start_index = 0
-            while sequence_ids[token_start_index] != 1:
-                token_start_index += 1
-
-            token_end_index = len(input_ids) - 1
-            while sequence_ids[token_end_index] != 1:
-                token_end_index -= 1
-
-            # if answer is out of the span
-            if not (offsets[token_start_index][0] <= start_char and offsets[token_end_index][1] >= end_char):
-                self.tokenizer_dict["start_positions"].append(cls_index)
-                self.tokenizer_dict["end_positions"].append(cls_index)
-            else:
-                while token_start_index < len(offsets) and offsets[token_start_index][0] <= start_char:
-                    token_start_index += 1
-                self.tokenizer_dict["start_positions"].append(token_start_index - 1)
-
-                while offsets[token_end_index][1] >= end_char:
-                    token_end_index -= 1
-                self.tokenizer_dict["end_positions"].append(token_end_index + 1)
-        return sample_mapping, offset_mapping
-
-
-    def __len__(self):
-        """
-        Return the number of features in the data
-        """
-        return len(self.sample_mapping)
-
-    def __getitem__(self, i):
-
-        og_index = self.sample_mapping[i]
-
-        item_dict = {
-            "input_ids": torch.tensor(self.input_ids[i]),
-            "attention_mask" : torch.tensor(self.attention_mask[i]),
-            "start_positions" : torch.tensor(self.tokenizer_dict["start_positions"][i]),
-            "end_positions" : torch.tensor(self.tokenizer_dict["end_positions"][i]),
-            "og_indices": og_index,
-            "og_contexts": self.contexts[og_index],
-            "og_questions": self.questions[og_index],
-            "og_answers": self.answers[og_index],
-            "og_start_indices": self.start_indices[og_index],
-            "og_end_indices": self.end_indices[og_index],
-            "offset_mapping": torch.tensor(self.offset_mapping[i]),
-            "og_question_ids": self.qids[og_index]
-
-        }
-        return item_dict
-
-def predict(dataset, xlnet_model, n_best_size,device='cpu', max_answer_length = 30):
+#### START OF PREDICTION ####
+def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
     print("Beginning Prediction")
-    pred_data = DataLoader(dataset=dataset, batch_size=16, shuffle=False)
+    pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
     bert = QA('bert/model')
+
+    bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
     
     with torch.no_grad():
+        quesAns = {}
+        for batch in test_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            start_positions = batch["start_positions"].to(device)
+            end_positions = batch["end_positions"].to(device)
+            question_ids = batch.get("question_ids")
+            contexts = batch.get("contexts")
+            offset_mappings = batch.get("offset_mappings")
+            
+            start_logits, end_logits = model(input_ids, attention_mask)
+
+            start_logits = start_logits.cpu().detach().numpy() #grad included
+            end_logits = end_logits.cpu().detach().numpy()
+            
+            for i, batch in enumerate(test_loader):
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                start_positions = batch["start_positions"].to(device)
+                end_positions = batch["end_positions"].to(device)
+            
+                question_ids = batch["question_ids"]
+                contexts = batch["contexts"]
+                offset_mappings = batch["offset_mappings"]
+            
+                start_logits, end_logits = model(input_ids, attention_mask)
+
+                start_logits = start_logits.cpu().detach().numpy() #grad included
+                end_logits = end_logits.cpu().detach().numpy()
+
+                for i in range(len(input_ids)):
+                    qid = question_ids[i]
+                    ctxt = contexts[i]
+                    start_logit = start_logits[i]
+                    end_logit = end_logits[i]
+                    offset = offset_mappings[i]
+                    answers = []
+
+                    for start_index in range(len(start_logit)):
+                        for end_index in range(start_index, len(end_logit)):
+                            if start_index <= end_index: # for each valid span
+                                score = start_logit[start_index] + end_logit[end_index]
+                                start_char = offset[start_index][0]
+                                end_char = offset[end_index][1]
+                                answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
+
+                    # sort by top scores
+                    answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
+                    pred[qid] = answers[0][3] if answers else ""
+
+                    # Save all n_best_size answers' scores
+                    scores[qid] = [
+                        {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
+                        for score, start_idx, end_idx, text in answers
+                    ]
+                    texts = []
+                    for ans in scores[qid]:
+                        texts.append(ans['text'])
+                    quesAns[qid] = texts
         for data in pred_data:
             input_ids = data["input_ids"].to(device)
             attention_mask = data["attention_mask"].to(device)
@@ -183,10 +122,10 @@ def predict(dataset, xlnet_model, n_best_size,device='cpu', max_answer_length = 
 
             for i in range(len(input_ids)):
                 print(question[i])
-                bert_pred = bert.predict(context[i], question[i])
-                print('Bert:')
-                print(bert_pred)
+                # BERT MODEL
+                bert_pred = bert.predict_full(context[i], question[i])
 
+                # XLNET  Model
                 pred = {}
                 start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
                 end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
@@ -235,24 +174,66 @@ def predict(dataset, xlnet_model, n_best_size,device='cpu', max_answer_length = 
                     pred[qid] = valid_answers[0]['text']
 
                 print('XLNET:')
-                print(pred)
+                print(valid_answers)
+
+                # Predicting based off max number of votes from all models.
+                ## Tie breaking condition is taking xlnet scores first (Better accuracy for now)
+                valid_answers_form = {pred['text'] : pred['score'] for pred in valid_answers}
+                valid_answers = list({pred['text'] for pred in valid_answers})
+                
+                predictions = []
+                for i in range(n_best_size):
+                    predictions.append(bert_pred[i]['answer'])
+
+                bilstm_preds = quesAns[qid]
+                predictions += bilstm_preds
+
+                predictions += valid_answers
+                print('all predictions counted')
+                predictions = Counter(predictions)
+                fin = predictions.most_common()
+                max_counts = fin[0][1]
+
+                filtered_predictions = {pred : count for pred, count in predictions.items() if count == max_counts}
+                print(filtered_predictions)
+
+                pos = {}
+
+                for pred in filtered_predictions.keys():
+                    if pred in valid_answers_form.keys():
+                        pos[pred] = valid_answers_form[pred]
+                
+                if len(pos) == 0:
+                    for i in range(len(bert_pred)):
+                        if bert_pred[i]['answer'] in filtered_predictions.keys():
+                            pos[bert_pred[i]['answer']] = bert_pred[i]['confidence']
+                print(max(pos, key=pos.get))
                 break
             break
+
 
 def main(args):
     data = SquadDataset(args.data_path)
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
-    checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
-    model.load_state_dict(checkpoint["model_state_dict"])
-    ans = predict(data, model, 20)
+    #checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
+    #model.load_state_dict(checkpoint["model_state_dict"])
+
+    bilstm_dataset = biLSTMDataset(in_path=args.data_path)
+    bilstm_model = BERT_BiLSTM(64).to(torch.device('cpu'))
+    #bilstmCheckpoint = torch.load(args.bilstm_model)
+    #model.load_state_dict(checkpoint["model_state_dict"])
+    ans = predict(data, model, bilstm_dataset, bilstm_model, 20)
     return ans
+
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--xlnet_model', help='path to xlnet model')
+    parser.add_argument('--bilstm_model', help='path to bilstm model')
     return parser.parse_args()
 
 if __name__ == "__main__":
+    #print(sys.path)
     args = get_arguments()
     main(args)
     print("Completed!")
