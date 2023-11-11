@@ -12,10 +12,13 @@ import xlnet
 from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
-
-#from bert import *
-#from bert.bert import *
-from bilstm_bert import biLSTMDataset, BERT_BiLSTM
+import argparse
+import xlnet
+# import bert
+# from bert import *
+from bert.bert_model import QA
+import sys
+from bilstm_bert import *
 from collections import Counter
 from xlnet import SquadDataset
 
