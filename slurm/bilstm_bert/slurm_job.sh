@@ -9,5 +9,7 @@
 #SBATCH --partition=medium
 #SBATCH -o cs4248_g14.out
 
-chmod +x bilstm.sh
-srun bilstm.sh
+chmod +x bilstm_train.sh
+chmod +x bilstm_train_kf.sh
+srun bilstm_train.sh
+srun bilstm_train_kf.sh
