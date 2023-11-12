@@ -634,8 +634,11 @@ def main(args):
         train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
 
     if args.test:
+        score_path = args.score_path
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["model_state_dict"])
+        
+        print('\nFinal Testing on given Test Set...')
 
         test_set = biLSTMDataset(test_path)
 
@@ -651,7 +654,7 @@ def main(args):
         print('\n==== All done ====')
 
     if args.train_kf:
-        score_path, metric_path =  args.score_path, args.metric_path
+        metric_path = args.metric_path
 
         train_set = biLSTMDataset(train_path)
 
@@ -668,17 +671,7 @@ def main(args):
                 metric_sums[key] += fold_metrics[key]
                 
         cval_metrics = {metric: total / k for metric, total in metric_sums.items()}
-
-        print('\nFinal Testing on given Test Set...')
-        test_set = biLSTMDataset(test_path)
-        test_outputs, test_scores, metrics = test_eval(model, dataset=test_set, n_best_size = n_best_size, device=device)
-
-        serializable_test_scores = make_serializable(test_scores)
-
-        with open(score_path, "w", encoding='utf-8') as file:
-            json.dump(serializable_test_scores, file, ensure_ascii=False, indent=4)
-
-        json.dump(test_outputs, open(output_path,"w"), ensure_ascii=False, indent=4)
+        
         json.dump(cval_metrics, open(metric_path,"w"), ensure_ascii=False, indent=4)
         print('\nSuccessful json dump!')
 
