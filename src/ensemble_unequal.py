@@ -8,12 +8,13 @@ python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/
 python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
 
 - to obtain the possible candidates along their scores for test data and apply optimal weights to obtain final prediction
-python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_unequal_optuna.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.39 --roberta_weight 0.61
+python ensemble_unequal.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_unequal.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
+python ensemble_unequal.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.39 --roberta_weight 0.61
 
-Additional installations
-pip install ijson
+- to obtan results of the ensemble method with unequal probabiltiy weighting
+python3 src/ensemble_unequal.py --test --xlnet_dict src/xlnet_val.json --roberta_dict src/roberta_val.json --output_path src 
+
 '''
 
 import argparse
@@ -23,8 +24,6 @@ import numpy as np
 import re
 import string
 import collections
-import optuna
-import ijson
 import math
 import heapq
 
@@ -182,18 +181,20 @@ def aggregate_predictions(all_preds: dict, alpha: int, accs: list) -> dict:
                     continue
                 for char_pos, prob in pos_preds.items(): # char pos, prob
                     if char_pos in aggregated_preds[qid][pos_type]:
-                        aggregated_preds[qid][pos_type][char_pos] += prob * weight
+                        aggregated_preds[qid][pos_type][char_pos] += float(prob) * weight
                     else:
-                        aggregated_preds[qid][pos_type][char_pos] = prob * weight
+                        aggregated_preds[qid][pos_type][char_pos] = float(prob) * weight
 
     # Normalize Ps and Pe for each char position
     for qid, pos in aggregated_preds.items():
         for pos_type in pos.keys():
-            total_prob = sum(aggregated_preds[qid][pos_type].values())
+            if pos_type == "answers" or pos_type == "context":
+                continue
+            total_prob = sum(float(value) for value in aggregated_preds[qid][pos_type].values())
             for pos in aggregated_preds[qid][pos_type]:
                 aggregated_preds[qid][pos_type][pos] /= total_prob
             aggregated_preds[qid]['answers'] = all_preds[0][qid]['answers']
-            aggregated_preds[qid]['context'] = all_preds[0][qid]['contexts']
+            aggregated_preds[qid]['context'] = all_preds[0][qid]['context']
 
     return aggregated_preds
 
@@ -290,14 +291,16 @@ def main(args):
         f2 = open(args.roberta_dict)
         roberta_pred = json.load(f2)
 
-        all_preds = 
+        all_preds = [roberta_pred, xlnet_pred]
 
-        a1 = open(args.xlnet_dict)
-        xlnet_acc = json.load(a1)
-        a2 = open(args.roberta_dict)
-        roberta_acc = json.load(a2)
+        # a1 = open(args.xlnet_dict)
+        # xlnet_acc = json.load(a1)
+        # a2 = open(args.roberta_dict)
+        # roberta_acc = json.load(a2)
 
-        accs = [xlnet_acc, roberta_acc, 0.87]
+        # accs = [xlnet_acc, roberta_acc, 0.87]
+
+        accs = [0.88, 0.89]
 
         fixed_alpha = 4
         auto_alpha = calc_autotune_alpha(accs)
@@ -312,9 +315,9 @@ def main(args):
         auto_pred = post_processing(weighted_prob_auto)
         equal_pred = post_processing(weighted_prob_equal)
 
-        json.dump(fixed_pred, open(output_path+"/unequal_weight_fixed_pred.json","w"), ensure_ascii=False, indent=4)
-        json.dump(auto_pred, open(output_path+"/unequal_weight_auto_pred.json","w"), ensure_ascii=False, indent=4)
-        json.dump(equal_pred, open(output_path+"/unequal_weight_equal_pred.json","w"), ensure_ascii=False, indent=4)
+        json.dump(fixed_pred, open(output_path+"/unequal_weight_fixed_pred.json","w", encoding='utf-8'), ensure_ascii=False, indent=4)
+        json.dump(auto_pred, open(output_path+"/unequal_weight_auto_pred.json","w", encoding='utf-8'), ensure_ascii=False, indent=4)
+        json.dump(equal_pred, open(output_path+"/unequal_weight_equal_pred.json","w", encoding='utf-8'), ensure_ascii=False, indent=4)
         print('\nSuccessful json dump!')
 
 def get_arguments():
@@ -330,12 +333,10 @@ def get_arguments():
     parser.add_argument('--xlnet_dict', help='path to save xlnet pred on val/test data')
     parser.add_argument('--roberta_dict', help='path to save roberta pred on val/test data')
     parser.add_argument('--output_path', help='path to save final prediction for test data')
-    parser.add_argument('--roberta_weight', default=0.5, help='roberta weight for ensemble')
-    parser.add_argument('--xlnet_weight', default=0.5, help='xlnet weight for ensemble')
+
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = get_arguments()
     main(args)
     print("Completed!")
-    
