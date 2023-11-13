@@ -8,4 +8,6 @@ python ../../src/bilstm_bert.py \
 python ../../src/bilstm_bert.py \
 	--test \
 	--test_path "../../data/curated/test_data"\
-	--model_path "./bilstm.pt"
+	--model_path "./bilstm.pt"\
+	--output_path "./bilstm_pred.json"\
+	--score_path "./bilstm_scores.json"

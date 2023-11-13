@@ -31,9 +31,7 @@ pip install pytorch_transformers
 (From main folder cs4248_g14_mrc)
 
 To run this file, use the command:
-(delete rows below, currently not all in) python src/max_vote.py --data_path data/curated/test_data --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt
-
-Current: python src/max_vote.py --data_path data/curated/test_data
+python src/max_vote.py --data_path data/curated/test_data --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path allMaxVoteAns.json --final_output_path maxVoteAns.json
 '''
 
 torch.manual_seed(0)
@@ -45,8 +43,16 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
     bert = QA('bert/model')
 
     bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
-    
+
+    final_pred = {}
+    final_pred_all = {}
+
+    correct_pred = 0
+
+    total = len(bilstm_dataset.questions)
+
     with torch.no_grad():
+        print("Running biLSTM")
         quesAns = {}
         for batch in test_loader:
             input_ids = batch["input_ids"].to(device)
@@ -195,7 +201,6 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
                 max_counts = fin[0][1]
 
                 filtered_predictions = {pred : count for pred, count in predictions.items() if count == max_counts}
-                print(filtered_predictions)
 
                 pos = {}
 
@@ -207,22 +212,46 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
                     for i in range(len(bert_pred)):
                         if bert_pred[i]['answer'] in filtered_predictions.keys():
                             pos[bert_pred[i]['answer']] = bert_pred[i]['confidence']
-                print(max(pos, key=pos.get))
+                top_answer = max(pos, key=pos.get)
+
+                correct_answer = answer[i]
+                # Calculate accuracy
+                if top_answer == correct_ans:
+                    correct_pred += 1
+
+                # Calculate F1 score
+                f1 = calc_f1(top_answer, correct_ans)
+                f1_scores.append(f1)
+
+                final_pred[qid] = top_answer
+                final_pred_all[qid] = pos
                 break
             break
 
+    exact_match = correct_pred / total
+    f1 = sum(f1_scores) / total
+
+    print(f"Exact match: {exact_match}")
+    print(f"f1: {f1}")
+    return final_pred, final_pred_all
+
 
 def main(args):
+    output_path = args.output_path
+    final_output_path = args.final_output_path
     data = SquadDataset(args.data_path)
     model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
-    #checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
-    #model.load_state_dict(checkpoint["model_state_dict"])
+    checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
+    model.load_state_dict(checkpoint["model_state_dict"])
 
     bilstm_dataset = biLSTMDataset(in_path=args.data_path)
     bilstm_model = BERT_BiLSTM(64).to(torch.device('cpu'))
-    #bilstmCheckpoint = torch.load(args.bilstm_model)
-    #model.load_state_dict(checkpoint["model_state_dict"])
-    ans = predict(data, model, bilstm_dataset, bilstm_model, 20)
+    bilstmCheckpoint = torch.load(args.bilstm_model)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    final_pred, final_pred_all = predict(data, model, bilstm_dataset, bilstm_model, 20)
+
+    json.dump(final_pred_all, open(output_path,"w"), ensure_ascii=False, indent=4)
+    json.dump(final_pred, open(final_output_path, "w"), ensure_ascii=False, indent=4)
     return ans
 
 def get_arguments():
@@ -230,6 +259,8 @@ def get_arguments():
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--xlnet_model', help='path to xlnet model')
     parser.add_argument('--bilstm_model', help='path to bilstm model')
+    parser.add_argument('--output_path', help='path to all outputs')
+    parser.add_argument('--final_output_path', help= 'path for all single outputs')
     return parser.parse_args()
 
 if __name__ == "__main__":
