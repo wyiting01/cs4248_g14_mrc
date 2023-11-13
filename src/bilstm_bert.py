@@ -1,5 +1,7 @@
 '''
 Run Train and test, Single Holdout
+python3 src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path model.pt
+python3 src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
 python3 src/bilstm_bert.py --train --test --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
 
 Run KFolds 
@@ -580,20 +582,20 @@ def make_serializable(obj):
 
 def main(args):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = BERT_BiLSTM(hidden_dim).to(device)
-    train_path, test_path, model_path = args.train_path, args.test_path, args.model_path
+    model_path = args.model_path
 
     if args.train:
+        train_path = args.train_path
         train_set = biLSTMDataset(train_path)
-
+        model = BERT_BiLSTM(hidden_dim).to(device)
         # Single Holdout Training
         train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
 
     if args.test:
-        output_path, score_path =  args.output_path, args.score_path
+        test_path, output_path, score_path = args.test_path, args.output_path, args.score_path
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["model_state_dict"])
-        
+    
         print('\nFinal Testing on given Test Set...')
 
         test_set = biLSTMDataset(test_path)
@@ -610,7 +612,7 @@ def main(args):
         print('\n==== All done ====')
 
     if args.train_kf:
-        metric_path = args.metric_path
+        train_path, metric_path = args.train_path, args.metric_path
 
         train_set = biLSTMDataset(train_path)
 
@@ -620,6 +622,7 @@ def main(args):
         metric_sums = {'acc': 0, 'f1': 0}
 
         for fold, (train_index, test_index) in enumerate(kf.split(train_set)):
+            model = BERT_BiLSTM(hidden_dim).to(device)
             fold_metrics = cross_val_worker(fold, train_index, test_index, train_set, model, device, model_path, batch_size, collate_fn)
             print(fold_metrics)
 
