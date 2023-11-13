@@ -40,7 +40,7 @@ torch.manual_seed(0)
 def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
     print("Beginning Prediction")
     pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
-    bert = QA('bert/model')
+    bert = QA('src/bert/model')
 
     bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
 
@@ -54,7 +54,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
     with torch.no_grad():
         print("Running biLSTM")
         quesAns = {}
-        for batch in test_loader:
+        for batch in bilstm_pred_data:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             start_positions = batch["start_positions"].to(device)
@@ -68,50 +68,36 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
             start_logits = start_logits.cpu().detach().numpy() #grad included
             end_logits = end_logits.cpu().detach().numpy()
             
-            for i, batch in enumerate(test_loader):
-                input_ids = batch["input_ids"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                start_positions = batch["start_positions"].to(device)
-                end_positions = batch["end_positions"].to(device)
-            
-                question_ids = batch["question_ids"]
-                contexts = batch["contexts"]
-                offset_mappings = batch["offset_mappings"]
-            
-                start_logits, end_logits = model(input_ids, attention_mask)
+            for i in range(len(input_ids)):
+                qid = question_ids[i]
+                ctxt = contexts[i]
+                start_logit = start_logits[i]
+                end_logit = end_logits[i]
+                offset = offset_mappings[i]
+                answers = []
 
-                start_logits = start_logits.cpu().detach().numpy() #grad included
-                end_logits = end_logits.cpu().detach().numpy()
+                for start_index in range(len(start_logit)):
+                    for end_index in range(start_index, len(end_logit)):
+                        if start_index <= end_index: # for each valid span
+                            score = start_logit[start_index] + end_logit[end_index]
+                            start_char = offset[start_index][0]
+                            end_char = offset[end_index][1]
+                            answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
 
-                for i in range(len(input_ids)):
-                    qid = question_ids[i]
-                    ctxt = contexts[i]
-                    start_logit = start_logits[i]
-                    end_logit = end_logits[i]
-                    offset = offset_mappings[i]
-                    answers = []
+                # sort by top scores
+                answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
+                pred[qid] = answers[0][3] if answers else ""
 
-                    for start_index in range(len(start_logit)):
-                        for end_index in range(start_index, len(end_logit)):
-                            if start_index <= end_index: # for each valid span
-                                score = start_logit[start_index] + end_logit[end_index]
-                                start_char = offset[start_index][0]
-                                end_char = offset[end_index][1]
-                                answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
-
-                    # sort by top scores
-                    answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
-                    pred[qid] = answers[0][3] if answers else ""
-
-                    # Save all n_best_size answers' scores
-                    scores[qid] = [
-                        {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
-                        for score, start_idx, end_idx, text in answers
-                    ]
-                    texts = []
-                    for ans in scores[qid]:
-                        texts.append(ans['text'])
-                    quesAns[qid] = texts
+                # Save all n_best_size answers' scores
+                scores[qid] = [
+                    {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
+                    for score, start_idx, end_idx, text in answers
+                ]
+                texts = []
+                for ans in scores[qid]:
+                    texts.append(ans['text'])
+                quesAns[qid] = texts
+        print("Running XLNet")
         for data in pred_data:
             input_ids = data["input_ids"].to(device)
             attention_mask = data["attention_mask"].to(device)
@@ -239,16 +225,17 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
 def main(args):
     output_path = args.output_path
     final_output_path = args.final_output_path
-    data = SquadDataset(args.data_path)
-    model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
+    xlNetData = SquadDataset(args.data_path)
+    xlNetModel = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
     checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
-    model.load_state_dict(checkpoint["model_state_dict"])
+    xlNetModel.load_state_dict(checkpoint["model_state_dict"])
 
     bilstm_dataset = biLSTMDataset(in_path=args.data_path)
     bilstm_model = BERT_BiLSTM(64).to(torch.device('cpu'))
     bilstmCheckpoint = torch.load(args.bilstm_model)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    final_pred, final_pred_all = predict(data, model, bilstm_dataset, bilstm_model, 20)
+    bilstm_model.load_state_dict(bilstmCheckpoint["model_state_dict"])
+
+    final_pred, final_pred_all = predict(xlNetData, xlNetModel, bilstm_dataset, bilstm_model, 20)
 
     json.dump(final_pred_all, open(output_path,"w"), ensure_ascii=False, indent=4)
     json.dump(final_pred, open(final_output_path, "w"), ensure_ascii=False, indent=4)
@@ -256,11 +243,11 @@ def main(args):
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path', help='path to the dataset file')
-    parser.add_argument('--xlnet_model', help='path to xlnet model')
-    parser.add_argument('--bilstm_model', help='path to bilstm model')
-    parser.add_argument('--output_path', help='path to all outputs')
-    parser.add_argument('--final_output_path', help= 'path for all single outputs')
+    parser.add_argument('--data_path', required=True, help='path to the dataset file')
+    parser.add_argument('--xlnet_model', required=True, help='path to xlnet model')
+    parser.add_argument('--bilstm_model', required=True, help='path to bilstm model')
+    parser.add_argument('--output_path', required=True, help='path to all outputs')
+    parser.add_argument('--final_output_path', required=True, help= 'path for all single outputs')
     return parser.parse_args()
 
 if __name__ == "__main__":
