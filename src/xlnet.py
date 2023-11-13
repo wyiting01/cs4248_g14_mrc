@@ -237,7 +237,6 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     metrics = {}
     correct_pred = 0
     f1_scores = []
-    total_qid = 0
 
     print("Making Predictions on Test Dataset")
     with torch.no_grad():
@@ -311,11 +310,9 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 f1 = calc_f1(pred_top[qid], curr_answer)
                 f1_scores.append(f1)
 
-                total_qid += len(input_ids)
-                #print(total_qid, len(input_ids))
 
-    metrics['acc'] = correct_pred / total_qid
-    metrics['f1'] = sum(f1_scores) / total_qid
+    metrics['acc'] = correct_pred / len(f1_scores)
+    metrics['f1'] = sum(f1_scores) / len(f1_scores)
 
     return pred_all, pred_top, metrics
 
@@ -346,7 +343,7 @@ def main(args):
         learning_rate = 5e-5
 
         # train the model
-        train(model=model, dataset=squad_train)
+        train(model=model, dataset=squad_train, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=model_path)
     
     if args.test:
         test_path, model_path, output_path = args.data_path, args.model_path, args.output_path
@@ -384,7 +381,7 @@ def main(args):
 
         for fold, (train_index, test_index) in enumerate(kf.split(squad_train)):
             #cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path=None, batch_size=16, collate_fn=None)
-            fold_metrics = cross_val_worker(fold, train_index, test_index, squad_train, model, device, model_path)
+            fold_metrics = cross_val_worker(fold, train_index=train_index, test_index=test_index, dataset=squad_train, model=model, device=device, model_path=model_path)
             print(fold_metrics)
 
             for key in metric_sums:

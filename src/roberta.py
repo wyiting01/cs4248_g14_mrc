@@ -232,7 +232,6 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     metrics = {}
     correct_pred = 0
     f1_scores = []
-    total_qid = 0
 
     print("Making Predictions on Test Dataset")
     with torch.no_grad():
@@ -299,10 +298,8 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 f1 = calc_f1(pred[qid], curr_ans)
                 f1_scores.append(f1)
 
-                total_qid += len(input_ids)
-
-    metrics['acc'] = correct_pred / total_qid
-    metrics['f1'] = sum(f1_scores) / total_qid
+    metrics['acc'] = correct_pred / len(f1_scores)
+    metrics['f1'] = sum(f1_scores) / len(f1_scores)
 
     return pred, metrics
 
