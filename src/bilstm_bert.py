@@ -435,6 +435,7 @@ def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
     correct_pred = 0
     f1_scores = []
 
+    print("Final testing on Test Dataset...")
     with torch.no_grad():
         for i, batch in enumerate(test_loader):
             input_ids = batch["input_ids"].to(device)
