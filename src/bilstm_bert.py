@@ -462,70 +462,56 @@ def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
 
     print("Final testing on Test Dataset...")
     with torch.no_grad():
-        for batch in test_loader:
+        for i, batch in enumerate(test_loader):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             start_positions = batch["start_positions"].to(device)
             end_positions = batch["end_positions"].to(device)
-            question_ids = batch.get("question_ids")
-            contexts = batch.get("contexts")
-            offset_mappings = batch.get("offset_mappings")
-            
+        
+            question_ids = batch["question_ids"]
+            contexts = batch["contexts"]
+            offset_mappings = batch["offset_mappings"]
+        
             start_logits, end_logits = model(input_ids, attention_mask)
 
             start_logits = start_logits.cpu().detach().numpy() #grad included
             end_logits = end_logits.cpu().detach().numpy()
-            
-            for i, batch in enumerate(test_loader):
-                input_ids = batch["input_ids"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                start_positions = batch["start_positions"].to(device)
-                end_positions = batch["end_positions"].to(device)
-            
-                question_ids = batch["question_ids"]
-                contexts = batch["contexts"]
-                offset_mappings = batch["offset_mappings"]
-            
-                start_logits, end_logits = model(input_ids, attention_mask)
+            #print("Shape of start_logits:", start_logits.shape)
+            #print("Shape of end_logits:", end_logits.shape)
 
-                start_logits = start_logits.cpu().detach().numpy() #grad included
-                end_logits = end_logits.cpu().detach().numpy()
-                #print("Shape of start_logits:", start_logits.shape)
-                #print("Shape of end_logits:", end_logits.shape)
+            for i in range(len(input_ids)):
+                qid = question_ids[i]
+                ctxt = contexts[i]
+                start_logit = start_logits[i]
+                end_logit = end_logits[i]
+                offset = offset_mappings[i]
+                answers = []
 
-                for i in range(len(input_ids)):
-                    qid = question_ids[i]
-                    ctxt = contexts[i]
-                    start_logit = start_logits[i]
-                    end_logit = end_logits[i]
-                    offset = offset_mappings[i]
-                    answers = []
+                for start_index in range(len(start_logit)):
+                    for end_index in range(start_index, len(end_logit)):
+                        if start_index <= end_index: # for each valid span
+                            score = start_logit[start_index] + end_logit[end_index]
+                            start_char = offset[start_index][0]
+                            end_char = offset[end_index][1]
+                            answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
 
-                    for start_index in range(len(start_logit)):
-                        for end_index in range(start_index, len(end_logit)):
-                            if start_index <= end_index: # for each valid span
-                                score = start_logit[start_index] + end_logit[end_index]
-                                start_char = offset[start_index][0]
-                                end_char = offset[end_index][1]
-                                answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
+                # sort by top scores
+                answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
+                pred[qid] = answers[0][3] if answers else ""
 
-                    # sort by top scores
-                    answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
-                    pred[qid] = answers[0][3] if answers else ""
+                # Save all n_best_size answers' scores
+                scores[qid] = [
+                    {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
+                    for score, start_idx, end_idx, text in answers
+                ]
 
-                    # Save all n_best_size answers' scores
-                    scores[qid] = [
-                        {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
-                        for score, start_idx, end_idx, text in answers
-                    ]
-
-                    # Print out the predicted answer for a given question and context.
-                    print(f"Question ID: {qid}")
-                    print(f"Context: {ctxt}")
-                    print(f"Predicted Answer: {pred[qid]}")
-                    print(f"Top {n_best_size} predicted answers for Question ID {qid}:")
-                    for ans in scores[qid]:
-                        print(f"Score: {ans['score']:.4f}, Text: {ans['text']}")
+                # Print out the predicted answer for a given question and context.
+                print(f"Question ID: {qid}")
+                print(f"Context: {ctxt}")
+                print(f"Predicted Answer: {pred[qid]}")
+                print(f"Top {n_best_size} predicted answers for Question ID {qid}:")
+                for ans in scores[qid]:
+                    print(f"Score: {ans['score']:.4f}, Text: {ans['text']}")
                 
     print("Final testing completed. Best answers computed.")
     return pred, scores
