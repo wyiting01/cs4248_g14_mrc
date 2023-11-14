@@ -45,10 +45,10 @@ python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 
 ```
 # training:
-python
+Using pretrained weights
 
 # testing:
-python
+python src/bert/test.py --data_file *path to data file* --output_file *output file* --model_path *path to bert model folder*
 ```
 
 ### 2. RoBERTa
