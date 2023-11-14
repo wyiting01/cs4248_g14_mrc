@@ -28,10 +28,10 @@ pip install -U scikit-learn
 pip install transformers
 pip install pytorch_transformers
 
-(From main folder cs4248_g14_mrc)
-
 To run this file, use the command:
-python src/max_vote.py --data_path data/curated/test_data --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path allMaxVoteAns.json --final_output_path maxVoteAns.json
+python src/max_vote.py --data_path data/curated/test_data --bert_path bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path allMaxVoteAns.json --final_output_path maxVoteAns.json
+
+(Note: This is from main folder cs4248_g14_mrc, paths will change relative to where you run the command from.)
 '''
 
 torch.manual_seed(0)
@@ -41,7 +41,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
     print("Beginning Prediction")
     pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
     # Path is dependent on slurm job, may need to change this depending on where you start running max_vote.py.
-    bert = QA('../../src/bert/model')
+    bert = QA(args.bert_path)
 
     bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
 
@@ -245,6 +245,7 @@ def main(args):
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', required=True, help='path to the dataset file')
+    parser.add_argument('--bert_path', required=True, help='path to bert model')
     parser.add_argument('--xlnet_model', required=True, help='path to xlnet model')
     parser.add_argument('--bilstm_model', required=True, help='path to bilstm model')
     parser.add_argument('--output_path', required=True, help='path to all outputs')
