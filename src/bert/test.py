@@ -29,6 +29,7 @@ def main():
     # parser.add_argument("--question_id", help = "Path to Question ID file")
     # parser.add_argument("--context_input", help="Path to the context input file")
     parser.add_argument("--data_file", help = 'Path to data folder')
+    parser.add_argument('--model_path', help="Path to bert model folder")
     parser.add_argument("--output_file", help="Path to the output file")
 
     args = parser.parse_args()
@@ -47,7 +48,7 @@ def main():
 
     answers = {}
 
-    bert = QA('model')
+    bert = QA(args.model_path)
 
     for i in range(len(questions)):
         print(i)
