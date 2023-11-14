@@ -1,7 +1,18 @@
+'''
+Run Train and test, Single Holdout
+python3 src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path model.pt
+python3 src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+python3 src/bilstm_bert.py --train --test --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+
+Run KFolds 
+python3 src/bilstm_bert.py --train_kf --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --metric_path src/bilstm_metrics.json
+
+'''
 import argparse
 import datetime
 import json
 import numpy as np
+import json
 import random
 import sys
 import torch
@@ -191,6 +202,7 @@ class BERT_BiLSTM(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
         self.relu = nn.ReLU()
 
+
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
 
@@ -379,6 +391,7 @@ def collate_fn(batch):
     end_positions = [item["end_position"] for item in batch]
     question_ids = [item["question_ids"] for item in batch]
     contexts = [item["contexts"] for item in batch]
+    correct_answers = [item["correct_answers"] for item in batch]
     offset_mappings = [item["offset_mappings"] for item in batch]
 
     input_ids = pad_sequence(input_ids, batch_first=True)
@@ -418,6 +431,9 @@ def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
     pred = {}
     scores = {}
     metrics = {}
+
+    correct_pred = 0
+    f1_scores = []
 
     print("Final testing on Test Dataset...")
     with torch.no_grad():
@@ -567,20 +583,20 @@ def make_serializable(obj):
 
 def main(args):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = BERT_BiLSTM(hidden_dim).to(device)
-    train_path, test_path, model_path = args.train_path, args.test_path, args.model_path
+    model_path = args.model_path
 
     if args.train:
+        train_path = args.train_path
         train_set = biLSTMDataset(train_path)
-
+        model = BERT_BiLSTM(hidden_dim).to(device)
         # Single Holdout Training
         train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
 
     if args.test:
-        output_path, score_path =  args.output_path, args.score_path
+        test_path, output_path, score_path = args.test_path, args.output_path, args.score_path
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["model_state_dict"])
-        
+    
         print('\nFinal Testing on given Test Set...')
 
         test_set = biLSTMDataset(test_path)
@@ -597,7 +613,7 @@ def main(args):
         print('\n==== All done ====')
 
     if args.train_kf:
-        metric_path = args.metric_path
+        train_path, metric_path = args.train_path, args.metric_path
 
         train_set = biLSTMDataset(train_path)
 
@@ -607,6 +623,7 @@ def main(args):
         metric_sums = {'acc': 0, 'f1': 0}
 
         for fold, (train_index, test_index) in enumerate(kf.split(train_set)):
+            model = BERT_BiLSTM(hidden_dim).to(device)
             fold_metrics = cross_val_worker(fold, train_index, test_index, train_set, model, device, model_path, batch_size, collate_fn)
             print(fold_metrics)
 
@@ -625,9 +642,9 @@ def get_arguments():
     parser.add_argument('--train', default=False, action='store_true', help='train the model with single holdout trainset')
     parser.add_argument('--test', default=False, action='store_true', help='test the model')
     parser.add_argument('--train_kf', default=False, action='store_true', help='train the model with k folds validation, k=5')
-    parser.add_argument('--train_path', help='path to the training datasets')
-    parser.add_argument('--test_path', help='path to the test datasets')
-    parser.add_argument('--model_path', required=True, help='path to where the model is saved')
+    parser.add_argument('--train_path', default="data/curated/training_data", help='path to the training datasets')
+    parser.add_argument('--test_path', default="data/curated/test_data", help='path to the test datasets')
+    parser.add_argument('--model_path', default="model.pt", help='path to where the model is saved')
     parser.add_argument('--output_path', default="bilstm_pred.json", help='path to model_prediction')
     parser.add_argument('--score_path', default="bilstm_scores.json", help='path to model scores')
     parser.add_argument('--metric_path', default="bilstm_metrics.json", help='path to model metrics')

@@ -1,6 +1,7 @@
 #!/bin/sh
 
 #SBATCH --time=4320
+#SBATCH --mem=0
 #SBATCH --job-name=g14_bilstm
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=e0543676@comp.nus.edu.sg

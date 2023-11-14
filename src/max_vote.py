@@ -40,7 +40,8 @@ torch.manual_seed(0)
 def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
     print("Beginning Prediction")
     pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
-    bert = QA('src/bert/model')
+    # Path is dependent on slurm job, may need to change this depending on where you start running max_vote.py.
+    bert = QA('../../src/bert/model')
 
     bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
 
