@@ -209,3 +209,6 @@ To navigate around this repository, you can refer to the directory tree below:
 2. **model/** : This folder consists of all model weights for our models mentioned above
 3. **output/** : This folder consists of all the predictions output by each model mentioned above
 4. **src/** : This folder consists of the code needed for this entire project - preprocessing, individual model, ensemble model, and official evaluation script from SQuAD.
+
+## References:
+1. [Hugging Face Preprocessing for Modeling](https://huggingface.co/docs/transformers/tasks/question_answering)
