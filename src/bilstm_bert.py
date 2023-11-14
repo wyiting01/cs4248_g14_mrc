@@ -1,19 +1,31 @@
+'''
+Run Train and test, Single Holdout
+python3 src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path model.pt
+python3 src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+python3 src/bilstm_bert.py --train --test --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+
+Run KFolds 
+python3 src/bilstm_bert.py --train_kf --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --metric_path src/bilstm_metrics.json
+
+'''
 import argparse
 import datetime
-from itertools import islice
+import json
 import numpy as np
 import json
-import sys
 import random
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+
+from hyperopt import STATUS_OK
+from itertools import islice
 from sklearn.model_selection import KFold
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
-from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 
 '''
 Need to install libraries for hyperopt, numpy, sklearn, transformers:
@@ -34,12 +46,15 @@ python src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_pat
 
 # Default hyperparameters
 hidden_dim=64
-batch_size=16
+num_layers=2
+num_labels=10
+batch_size=20
 learning_rate=5e-5
 num_epoch=5
 dropout_rate=0.1
 seed = 0
-num_splits = 2
+k = 5
+max_length = 0
 n_best_size= 5
 
 # Ensure no randomisation for every iteration of run.
@@ -76,6 +91,13 @@ class biLSTMDataset(Dataset):
             
             # Initially cannot split because of how k fold works.
             self.spans = [span.split() for span in self.spans]
+
+        # Acitvate for debugging
+        # self.contexts = self.contexts[:5]
+        # self.questions = self.questions[:5]
+        # self.answers = self.answers[:5]
+        # self.spans = self.spans[:5]
+        # self.question_ids = self.question_ids[:5]
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
@@ -139,6 +161,16 @@ class biLSTMDataset(Dataset):
                     token_end_index -= 1
                 self.end_positions.append(token_end_index + 1)
 
+            #print(f"Processed question ID: {self.question_ids[sample_index]}")
+            #print(f"Original context: {context}")
+            #print(f"Original answer: {answer}")
+            #print(f"Adjusted start_char_pos: {start_char_pos}, end_char_pos: {end_char_pos}")
+            #print(f"Token start index: {token_start_index}, Token end index: {token_end_index}")
+            #print(f"check offsets start: {offsets[token_start_index][0]}, offsets end: {offsets[token_end_index][1]}")
+            #print(f"Token start position: {self.start_positions[-1]}, Token end position: {self.end_positions[-1]}")
+            #print(f"Text from tokens: {' '.join(self.tokenizer.convert_ids_to_tokens(input_ids[self.start_positions[-1]:self.end_positions[-1]+1]))}")
+            #print("Dataset initialisation complete.")
+
     def __len__(self):
         return len(self.contexts)
     
@@ -152,6 +184,7 @@ class biLSTMDataset(Dataset):
             "end_position": self.end_positions[i],
             "question_ids": self.question_ids[idx_i],
             "contexts": self.contexts[idx_i],
+            "correct_answers": self.answers[idx_i],
             "offset_mappings": self.offset_mapping[i]
         }
         return item
@@ -159,6 +192,7 @@ class biLSTMDataset(Dataset):
 class BERT_BiLSTM(nn.Module):   
     def __init__(self, hidden_dim):
         super(BERT_BiLSTM, self).__init__()
+
         self.hidden_dim = hidden_dim
         
         self.bert_encoder = BertModel.from_pretrained('bert-base-cased')
@@ -167,6 +201,7 @@ class BERT_BiLSTM(nn.Module):
         self.end_out = nn.Linear(hidden_dim * 2, 1)
         self.dropout = nn.Dropout(dropout_rate)
         self.relu = nn.ReLU()
+
 
     def forward(self, input_ids, attention_mask):
         bert_outputs = self.bert_encoder(input_ids, attention_mask=attention_mask)
@@ -181,27 +216,10 @@ class BERT_BiLSTM(nn.Module):
         
         return start_logits, end_logits
 
-# Helper function to prepare data for k fold validations.
-def extractAndMergeData(in_path):
-    contexts = read_content(f"{in_path}/context")
-    questions = read_content(f"{in_path}/question")
-    answers = read_content(f"{in_path}/answer")
-    spans = read_content(f"{in_path}/answer_span")
-    question_ids = read_content(f"{in_path}/question_id")
-
-    contexts = [ctx.strip() for ctx in contexts]
-    questions = [qn.strip() for qn in questions]
-    answers = [ans.strip() for ans in answers]
-    # Cannot split because of how k fold needs flat arrays.
-    spans = [span.strip() for span in spans]
-    question_ids = [qn_id.strip() for qn_id in question_ids]
-
-    return list(zip(contexts, questions, question_ids)), list(zip(answers, spans))
-
 # train
 def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epochs, device, model_path, test_set):
     # Perform Stratified K-Folds cross-validations.
-    kfold = KFold(n_splits=num_splits)
+    kfold = KFold(n_splits=k)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
 
@@ -365,6 +383,129 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
     return pred, scores
 
+# Pad to the right side
+def collate_fn(batch):
+    input_ids = [item["input_ids"] for item in batch]
+    attention_masks = [item["attention_mask"] for item in batch]
+    start_positions = [item["start_position"] for item in batch]
+    end_positions = [item["end_position"] for item in batch]
+    question_ids = [item["question_ids"] for item in batch]
+    contexts = [item["contexts"] for item in batch]
+    correct_answers = [item["correct_answers"] for item in batch]
+    offset_mappings = [item["offset_mappings"] for item in batch]
+
+    input_ids = pad_sequence(input_ids, batch_first=True)
+    attention_masks = pad_sequence(attention_masks, batch_first=True)
+    
+    padded_offset_mappings = pad_sequence(offset_mappings, batch_first=True, padding_value=0)
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_masks,
+        "start_positions": torch.tensor(start_positions).clone().detach(),
+        "end_positions": torch.tensor(end_positions).clone().detach(),
+        "offset_mappings": padded_offset_mappings,
+        "question_ids": question_ids,
+        "contexts": contexts,
+        "correct_answers": correct_answers
+    }
+
+def calc_f1(p, t):
+    p_tokens = p.split() # predicted
+    t_tokens = t.split() # true
+    common_tokens = set(p_tokens) & set(t_tokens)
+    if not p_tokens or not t_tokens:
+        return 0
+    precision = len(common_tokens) / len(p_tokens)
+    recall = len(common_tokens) / len(t_tokens)
+    if precision + recall == 0:
+        return 0
+    f1 = 2 * (precision * recall) / (precision + recall)
+    return f1
+
+## test based on scores
+def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
+    model.eval()
+    test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+    pred = {}
+    scores = {}
+    metrics = {}
+
+    correct_pred = 0
+    f1_scores = []
+
+    print("Final testing on Test Dataset...")
+    with torch.no_grad():
+        for i, batch in enumerate(test_loader):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            start_positions = batch["start_positions"].to(device)
+            end_positions = batch["end_positions"].to(device)
+            
+            question_ids = batch["question_ids"]
+            contexts = batch["contexts"]
+            offset_mappings = batch["offset_mappings"]
+            correct_answers = batch["correct_answers"]
+
+            start_logits, end_logits = model(input_ids, attention_mask)
+            
+            n = len(input_ids)
+
+            for i in range(len(input_ids)):
+                qid = question_ids[i]
+                ctxt = contexts[i]
+                start_logit = F.softmax(start_logits[i], dim=0).cpu().detach().numpy()
+                end_logit = F.softmax(end_logits[i], dim=0).cpu().detach().numpy()
+                offset = offset_mappings[i]
+                correct_ans = correct_answers[i]
+                answers = []
+
+                for start_index in range(len(start_logit)):
+                    for end_index in range(start_index, len(end_logit)):
+                        if start_index <= end_index: # for each valid span
+                            score = start_logit[start_index] + end_logit[end_index]
+                            start_char = offset[start_index][0]
+                            end_char = offset[end_index][1]
+                            answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
+
+                # sort by top scores
+                answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
+        
+                # output only the top answer
+                if len(answers) > 0:
+                    top_answer = answers[0][3]
+                    pred[qid] = top_answer
+
+                    # Save all n_best_size answers' scores
+                        # Initialize the dictionary structure for each qid
+                    if qid not in scores:
+                        scores[qid] = {"start": {}, "end": {}, "answers": correct_ans, "context": ctxt}
+                    
+                    for idx, logit in enumerate(start_logit):
+                        scores[qid]["start"][offset[idx][0]] = logit
+                    for idx, logit in enumerate(end_logit):
+                        scores[qid]["end"][offset[idx][1]] = logit
+                    scores[qid]["answers"] = correct_ans
+                    scores[qid]["context"] = ctxt
+                    
+                    # Calculate accuracy
+                    if top_answer == correct_ans:
+                        correct_pred += 1
+
+                    # Calculate F1 score
+                    f1 = calc_f1(top_answer, correct_ans)
+                    f1_scores.append(f1)
+                    
+                else:
+                    pred[qid] = ""
+                    scores[qid] = []
+    
+    metrics['acc'] = correct_pred / n
+    metrics['f1'] = sum(f1_scores) / n
+                
+    return pred, scores, metrics
+
 def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
     train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -384,6 +525,13 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
             optimizer.zero_grad()
 
             start_logits, end_logits = model(input_ids, attention_mask)
+
+            # Can't print everything or super big file.
+            if step == 0 :
+                print(f"Batch {batch} - Start Positions: {start_positions}")
+                print(f"Batch {batch} - End Positions: {end_positions}")
+                print("Start log:", start_logits)
+                print("End log:", end_logits)
 
             start_loss = criterion(start_logits, start_positions)
             end_loss = criterion(end_logits, end_positions)
@@ -411,165 +559,96 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
 
     print('Model saved in ', model_path)
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
-    return {'loss': total_loss/len(train_loader), 'status': STATUS_OK}
+    return {'loss': total_loss/len(train_loader)}
 
-# Pad to the right side
-def collate_fn(batch):
-    input_ids = [item["input_ids"] for item in batch]
-    attention_masks = [item["attention_mask"] for item in batch]
-    start_positions = [item["start_position"] for item in batch]
-    end_positions = [item["end_position"] for item in batch]
-    question_ids = [item["question_ids"] for item in batch]
-    contexts = [item["contexts"] for item in batch]
-    offset_mappings = [item["offset_mappings"] for item in batch]
+def cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path, batch_size=batch_size, collate_fn=collate_fn): 
+    print(f"Processing fold {fold + 1}...")
+    # # Create subsets 
+    train_subset = Subset(dataset, train_index)
+    test_subset = Subset(dataset, test_index)
 
-    input_ids = pad_sequence(input_ids, batch_first=True)
-    attention_masks = pad_sequence(attention_masks, batch_first=True)
-    
-    padded_offset_mappings = pad_sequence(offset_mappings, batch_first=True, padding_value=0)
+    train(model, train_subset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
+    pred, scores, metrics = test_eval(model, dataset=test_subset, n_best_size = n_best_size, device=device)
+    return metrics
 
-    return {
-        "input_ids": input_ids,
-        "attention_mask": attention_masks,
-        "start_positions": torch.tensor(start_positions).clone().detach(),
-        "end_positions": torch.tensor(end_positions).clone().detach(),
-        "offset_mappings": padded_offset_mappings,
-        "question_ids": question_ids,
-        "contexts": contexts
-    }
-
-# test
-def get_f1(p, t):
-    p_tokens = p.split() # predicted
-    t_tokens = t.split() # true
-    common_tokens = set(p_tokens) & set(t_tokens)
-    if not p_tokens or not t_tokens:
-        return 0
-    precision = len(common_tokens) / len(p_tokens)
-    recall = len(common_tokens) / len(t_tokens)
-    if precision + recall == 0:
-        return 0
-    f1 = 2 * (precision * recall) / (precision + recall)
-    return f1
-
-## test based on scores
-def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
-    model.eval()
-    test_loader = DataLoader(dataset, batch_size=20, shuffle=False, collate_fn=collate_fn)
-    pred = {}
-    scores = {}
-
-    print("Final testing on Test Dataset...")
-    with torch.no_grad():
-        for batch in test_loader:
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            start_positions = batch["start_positions"].to(device)
-            end_positions = batch["end_positions"].to(device)
-            question_ids = batch.get("question_ids")
-            contexts = batch.get("contexts")
-            offset_mappings = batch.get("offset_mappings")
-            
-            start_logits, end_logits = model(input_ids, attention_mask)
-
-            start_logits = start_logits.cpu().detach().numpy() #grad included
-            end_logits = end_logits.cpu().detach().numpy()
-            
-            for i, batch in enumerate(test_loader):
-                input_ids = batch["input_ids"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                start_positions = batch["start_positions"].to(device)
-                end_positions = batch["end_positions"].to(device)
-            
-                question_ids = batch["question_ids"]
-                contexts = batch["contexts"]
-                offset_mappings = batch["offset_mappings"]
-            
-                start_logits, end_logits = model(input_ids, attention_mask)
-
-                start_logits = start_logits.cpu().detach().numpy() #grad included
-                end_logits = end_logits.cpu().detach().numpy()
-                #print("Shape of start_logits:", start_logits.shape)
-                #print("Shape of end_logits:", end_logits.shape)
-
-                for i in range(len(input_ids)):
-                    qid = question_ids[i]
-                    ctxt = contexts[i]
-                    start_logit = start_logits[i]
-                    end_logit = end_logits[i]
-                    offset = offset_mappings[i]
-                    answers = []
-
-                    for start_index in range(len(start_logit)):
-                        for end_index in range(start_index, len(end_logit)):
-                            if start_index <= end_index: # for each valid span
-                                score = start_logit[start_index] + end_logit[end_index]
-                                start_char = offset[start_index][0]
-                                end_char = offset[end_index][1]
-                                answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
-
-                    # sort by top scores
-                    answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
-                    pred[qid] = answers[0][3] if answers else ""
-
-                    # Save all n_best_size answers' scores
-                    scores[qid] = [
-                        {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
-                        for score, start_idx, end_idx, text in answers
-                    ]
-
-                    # Print out the predicted answer for a given question and context.
-                    print(f"Question ID: {qid}")
-                    print(f"Context: {ctxt}")
-                    print(f"Predicted Answer: {pred[qid]}")
-                    print(f"Top {n_best_size} predicted answers for Question ID {qid}:")
-                    for ans in scores[qid]:
-                        print(f"Score: {ans['score']:.4f}, Text: {ans['text']}")
-                
-    print("Final testing completed. Best answers computed.")
-    return pred, scores
+def make_serializable(obj):
+    if isinstance(obj, torch.Tensor):
+        return obj.item() if obj.numel() == 1 else obj.tolist()
+    elif isinstance(obj, np.float32):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {make_serializable(key): make_serializable(value) for key, value in obj.items()}
+    else:
+        return obj
 
 def main(args):
-    train_path = args.train_path
-    test_path = args.test_path
-    model_path = args.model_path
-    output_path = args.output_path
-    score_path = args.score_path
-
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    model = BERT_BiLSTM(hidden_dim).to(device)
+    model_path = args.model_path
 
     if args.train:
-        #test_outputs, test_scores = split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoch, device, model_path, test_set)
+        train_path = args.train_path
         train_set = biLSTMDataset(train_path)
-
+        model = BERT_BiLSTM(hidden_dim).to(device)
+        # Single Holdout Training
         train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
 
     if args.test:
+        test_path, output_path, score_path = args.test_path, args.output_path, args.score_path
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["model_state_dict"])
+    
+        print('\nFinal Testing on given Test Set...')
 
         test_set = biLSTMDataset(test_path)
-    
-        test_outputs, test_scores = test_eval(model, dataset=test_set, n_best_size = n_best_size, device=device)
+
+        test_outputs, test_scores, metrics = test_eval(model, dataset=test_set, n_best_size = n_best_size, device=device)
+
+        serializable_test_scores = make_serializable(test_scores)
 
         json.dump(test_outputs, open(output_path,"w"), ensure_ascii=False, indent=4)
-        json.dump(test_scores, open(score_path,"w"), ensure_ascii=False, indent=4)
+        with open(score_path, "w", encoding='utf-8') as file:
+            json.dump(serializable_test_scores, file, ensure_ascii=False, indent=4)
+
+        print('\nSuccessful json dump!')
+        print('\n==== All done ====')
+
+    if args.train_kf:
+        train_path, metric_path = args.train_path, args.metric_path
+
+        train_set = biLSTMDataset(train_path)
+
+        # KFoldCrossVal Process 
+        kf = KFold(n_splits=k, shuffle=True, random_state=42)
+
+        metric_sums = {'acc': 0, 'f1': 0}
+
+        for fold, (train_index, test_index) in enumerate(kf.split(train_set)):
+            model = BERT_BiLSTM(hidden_dim).to(device)
+            fold_metrics = cross_val_worker(fold, train_index, test_index, train_set, model, device, model_path, batch_size, collate_fn)
+            print(fold_metrics)
+
+            for key in metric_sums:
+                metric_sums[key] += fold_metrics[key]
+                
+        cval_metrics = {metric: total / k for metric, total in metric_sums.items()}
+        
+        json.dump(cval_metrics, open(metric_path,"w"), ensure_ascii=False, indent=4)
         print('\nSuccessful json dump!')
 
-    print('\n==== All done ====')
+        print('\n==== All done ====')
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', default=False, action='store_true', help='train the model')
+    parser.add_argument('--train', default=False, action='store_true', help='train the model with single holdout trainset')
     parser.add_argument('--test', default=False, action='store_true', help='test the model')
-    parser.add_argument('--train_path', help='path to the training datasets')
-    parser.add_argument('--test_path', help='path to the test datasets')
-    parser.add_argument('--model_path', help='path to where the model is saved')
-    parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
-    parser.add_argument('--score_path', default="scores.json", help='path to model scores')
-
+    parser.add_argument('--train_kf', default=False, action='store_true', help='train the model with k folds validation, k=5')
+    parser.add_argument('--train_path', default="data/curated/training_data", help='path to the training datasets')
+    parser.add_argument('--test_path', default="data/curated/test_data", help='path to the test datasets')
+    parser.add_argument('--model_path', default="model.pt", help='path to where the model is saved')
+    parser.add_argument('--output_path', default="bilstm_pred.json", help='path to model_prediction')
+    parser.add_argument('--score_path', default="bilstm_scores.json", help='path to model scores')
+    parser.add_argument('--metric_path', default="bilstm_metrics.json", help='path to model metrics')
+    
     return parser.parse_args()
 
 if __name__ == "__main__":
