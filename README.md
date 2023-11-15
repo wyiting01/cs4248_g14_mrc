@@ -164,6 +164,7 @@ To add in
 To navigate around this repository, you can refer to the directory tree below:
 ```
 
+```
 ├── data
 |    ├── raw
 |    |    ├── dev-v1.1.json
@@ -198,7 +199,11 @@ To navigate around this repository, you can refer to the directory tree below:
 |    ├── bert_squad.pt
 |    ├── bilstm.pt
 |    ├── roberta.pt
-|    └── xlnet.pt
+|    ├── xlnet.pt
+|    ├── roberta_optuna.pt
+|    ├── xlnet_optuna.pt
+|    ├── roberta_kf.pt
+|    └── xlnet_kf.pt
 ├── output
 |    ├── bert_squad_pred.json
 |    ├── bilstm_pred.json
