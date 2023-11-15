@@ -194,7 +194,6 @@ class BERT_BiLSTM(nn.Module):
         super(BERT_BiLSTM, self).__init__()
 
         self.hidden_dim = hidden_dim
-        
         self.bert_encoder = BertModel.from_pretrained('bert-base-cased')
         self.lstm = nn.LSTM(input_size=768, hidden_size=hidden_dim, bidirectional=True, batch_first=True)
         self.start_out = nn.Linear(hidden_dim * 2, 1)
