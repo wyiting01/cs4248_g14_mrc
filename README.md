@@ -29,7 +29,7 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 |           | Equal - Maximum        | 78.89309366130558                | 86.70557785319596               |
 |           | Equal - Multiplicative | <ins>**82.19489120151371**</ins> | <ins>**88.9101732833653**</ins> |
 |           | Unequal - Optuna       | 81.47587511825922                | 88.20920854244099               |
-|           | Unequal - CWAPE        | TBC                              | TBC                             |
+|           | Unequal - CAWPE        | TBC                              | TBC                             |
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
@@ -149,10 +149,11 @@ python src/ensemble/ensemble_unequal_optuna.py --test --xlnet_dict "intermediate
 ```
 > Note that training of both models (as well as getting candidates) cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
 
-**4. Weighting based on Optuna**  
+**4. Weighting based on CAWPE**  
 ```
 to add in
 ```
+
 ### Max Voting
 
 ```
