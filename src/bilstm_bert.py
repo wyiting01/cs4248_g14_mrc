@@ -1,5 +1,12 @@
 '''
-python3 src/bilstm_bert.py --train_kf --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+Run Train and test, Single Holdout
+python3 src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path model.pt
+python3 src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+python3 src/bilstm_bert.py --train --test --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+
+Run KFolds 
+python3 src/bilstm_bert.py --train_kf --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --metric_path src/bilstm_metrics.json
+
 '''
 import argparse
 import datetime
@@ -38,7 +45,6 @@ python src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_pat
 '''
 
 # Default hyperparameters
-input_size=28
 hidden_dim=64
 num_layers=2
 num_labels=10
@@ -184,7 +190,7 @@ class biLSTMDataset(Dataset):
         return item
 
 class BERT_BiLSTM(nn.Module):   
-    def __init__(self, input_size, hidden_dim, num_layers, num_labels):
+    def __init__(self, hidden_dim):
         super(BERT_BiLSTM, self).__init__()
 
         self.hidden_dim = hidden_dim
@@ -377,54 +383,6 @@ def split_and_train(model, x_train, y_train, batch_size, learning_rate, num_epoc
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
     return pred, scores
 
-def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
-    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
-
-    start = datetime.datetime.now()
-    for epoch in range(num_epoch):
-        model.train()
-        total_loss = 0.0
-        for step, batch in enumerate(train_loader, 0):
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            
-            start_positions = batch["start_positions"].to(device).long()
-            end_positions = batch["end_positions"].to(device).long()
-
-            optimizer.zero_grad()
-
-            start_logits, end_logits = model(input_ids, attention_mask)
-
-            start_loss = criterion(start_logits, start_positions)
-            end_loss = criterion(end_logits, end_positions)
-            loss = (start_loss + end_loss) / 2
-
-            loss.backward()
-
-            optimizer.step()
-
-            total_loss += loss.item() / len(train_loader)
-            
-            if step % 100 == 99:
-                print('[%d, %5d] loss: %.3f' %
-                    (epoch + 1, step + 1, total_loss / 100))
-    end = datetime.datetime.now()
-
-    checkpoint = {
-        'epoch': num_epoch,
-        'lr': learning_rate,
-        'batch_size': batch_size,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict()
-    }
-    torch.save(checkpoint, model_path)
-
-    print('Model saved in ', model_path)
-    print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
-    return {'loss': total_loss/len(train_loader), 'status': STATUS_OK}
-
 # Pad to the right side
 def collate_fn(batch):
     input_ids = [item["input_ids"] for item in batch]
@@ -477,6 +435,7 @@ def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
     correct_pred = 0
     f1_scores = []
 
+    print("Final testing on Test Dataset...")
     with torch.no_grad():
         for i, batch in enumerate(test_loader):
             input_ids = batch["input_ids"].to(device)
@@ -624,18 +583,21 @@ def make_serializable(obj):
 
 def main(args):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = BERT_BiLSTM(input_size, hidden_dim, num_layers, num_labels).to(device)
-    train_path, test_path, model_path, output_path= args.train_path, args.test_path, args.model_path, args.output_path
+    model_path = args.model_path
 
     if args.train:
+        train_path = args.train_path
         train_set = biLSTMDataset(train_path)
-
+        model = BERT_BiLSTM(hidden_dim).to(device)
         # Single Holdout Training
         train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
 
     if args.test:
+        test_path, output_path, score_path = args.test_path, args.output_path, args.score_path
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["model_state_dict"])
+    
+        print('\nFinal Testing on given Test Set...')
 
         test_set = biLSTMDataset(test_path)
 
@@ -651,7 +613,7 @@ def main(args):
         print('\n==== All done ====')
 
     if args.train_kf:
-        score_path, metric_path =  args.score_path, args.metric_path
+        train_path, metric_path = args.train_path, args.metric_path
 
         train_set = biLSTMDataset(train_path)
 
@@ -661,6 +623,7 @@ def main(args):
         metric_sums = {'acc': 0, 'f1': 0}
 
         for fold, (train_index, test_index) in enumerate(kf.split(train_set)):
+            model = BERT_BiLSTM(hidden_dim).to(device)
             fold_metrics = cross_val_worker(fold, train_index, test_index, train_set, model, device, model_path, batch_size, collate_fn)
             print(fold_metrics)
 
@@ -668,17 +631,7 @@ def main(args):
                 metric_sums[key] += fold_metrics[key]
                 
         cval_metrics = {metric: total / k for metric, total in metric_sums.items()}
-
-        print('\nFinal Testing on given Test Set...')
-        test_set = biLSTMDataset(test_path)
-        test_outputs, test_scores, metrics = test_eval(model, dataset=test_set, n_best_size = n_best_size, device=device)
-
-        serializable_test_scores = make_serializable(test_scores)
-
-        with open(score_path, "w", encoding='utf-8') as file:
-            json.dump(serializable_test_scores, file, ensure_ascii=False, indent=4)
-
-        json.dump(test_outputs, open(output_path,"w"), ensure_ascii=False, indent=4)
+        
         json.dump(cval_metrics, open(metric_path,"w"), ensure_ascii=False, indent=4)
         print('\nSuccessful json dump!')
 
@@ -689,9 +642,9 @@ def get_arguments():
     parser.add_argument('--train', default=False, action='store_true', help='train the model with single holdout trainset')
     parser.add_argument('--test', default=False, action='store_true', help='test the model')
     parser.add_argument('--train_kf', default=False, action='store_true', help='train the model with k folds validation, k=5')
-    parser.add_argument('--train_path', required=True, help='path to the training datasets')
-    parser.add_argument('--test_path', required=True, help='path to the test datasets')
-    parser.add_argument('--model_path', required=True, help='path to where the model is saved')
+    parser.add_argument('--train_path', default="data/curated/training_data", help='path to the training datasets')
+    parser.add_argument('--test_path', default="data/curated/test_data", help='path to the test datasets')
+    parser.add_argument('--model_path', default="model.pt", help='path to where the model is saved')
     parser.add_argument('--output_path', default="bilstm_pred.json", help='path to model_prediction')
     parser.add_argument('--score_path', default="bilstm_scores.json", help='path to model scores')
     parser.add_argument('--metric_path', default="bilstm_metrics.json", help='path to model metrics')

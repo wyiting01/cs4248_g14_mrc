@@ -19,15 +19,17 @@ The third line illustrates how we can further split the training data into train
 ## Experiment Results
 The table below reports the Exact and F1 scores evaluted from the official SQuAD evaluation script `evaluate-v2.0.py`.  
 
-|  | Model | Exact | F1 |
-| ---- | ----- | ----- | -- |
-| BASELINE | BERT-SQuAD | 57.79564806054872 | 72.18288133527203 |
-| | RoBERTa | 81.20151371807 | 88.41621816924753 |
-| | XLNet | 75.34531693472091 | 84.06374401013184 |
-| | biLSTM | TBC | TBC | 
-| ENSEMBLE | Equal - Maximum | 78.89309366130558 | 86.70557785319596 |
-| | Equal - Multiplicative | <ins>**82.19489120151371**</ins> | <ins>**88.9101732833653**</ins> |
-| | Unequal - Optuna | 81.47587511825922 | 88.20920854244099
+|           | Model                  | Exact                            | F1                              |
+| --------- | ---------------------- | -------------------------------- | ------------------------------- |
+| BASELINE  | BERT-SQuAD             | 57.79564806054872                | 72.18288133527203               |
+|           | RoBERTa                | 81.20151371807                   | 88.41621816924753               |
+|           | XLNet                  | 75.34531693472091                | 84.06374401013184               |
+|           | biLSTM                 | TBC                              | TBC                             | 
+| ENSEMBLE  | Max Voting             | TBC                              | TBC                             |
+|           | Equal - Maximum        | 78.89309366130558                | 86.70557785319596               |
+|           | Equal - Multiplicative | <ins>**82.19489120151371**</ins> | <ins>**88.9101732833653**</ins> |
+|           | Unequal - Optuna       | 81.47587511825922                | 88.20920854244099               |
+|           | Unequal - CWAPE        | TBC                              | TBC                             |
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
@@ -43,10 +45,10 @@ python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 
 ```
 # training:
-python
+Using pretrained weights
 
 # testing:
-python
+python src/bert/test.py --data_file *path to data file* --output_file *output file* --model_path *path to bert model folder*
 ```
 
 ### 2. RoBERTa
@@ -83,6 +85,7 @@ python src/bilstm_bert.py --train --train_path "data/curated/training_data/" --m
 
 # testing:
 python src/bilstm_bert.py --test --test_path "data/curated/test_data/" --model_path "model/bilstm.pt"
+```
 
 ## Ensemble Models
 
@@ -206,3 +209,6 @@ To navigate around this repository, you can refer to the directory tree below:
 2. **model/** : This folder consists of all model weights for our models mentioned above
 3. **output/** : This folder consists of all the predictions output by each model mentioned above
 4. **src/** : This folder consists of the code needed for this entire project - preprocessing, individual model, ensemble model, and official evaluation script from SQuAD.
+
+## References:
+1. [Hugging Face Preprocessing for Modeling](https://huggingface.co/docs/transformers/tasks/question_answering)
