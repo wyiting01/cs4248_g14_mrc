@@ -33,7 +33,7 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
-python src/evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
+python src/evaluate-v2.0.py data/raw/dev-v1.1.json output/pred.json
 ```
 > Note that `pred.json` can be replaced with any output json files containing the predictions of your target model found in `output/`
 
