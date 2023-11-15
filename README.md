@@ -40,7 +40,7 @@ python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 ## Baseline Models
 
 ### 1. BERT-SQuAD
-- Folder: `src/bert`
+- Folder: `src/baseline/bert`
 - Model: [BERT-SQuAD](https://github.com/kamalkraj/BERT-SQuAD/tree/master)
 
 ```
@@ -48,46 +48,52 @@ python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 Using pretrained weights
 
 # testing:
-python src/bert/test.py --test --question_input "../data/curated/test_data/question" --context_input "../data/curated/test_data/context" --output_file "./pred.json"
+python src/baseline/bert/test.py --test --question_input "../data/curated/test_data/question" --context_input "../data/curated/test_data/context" --output_file "./pred.json"
 ```
 
 ### 2. RoBERTa
-- Script: `src/roberta.py`
+- Script: `src/baseline/roberta.py`
 - Model: [RobertaForQuestionAnswering](https://huggingface.co/docs/transformers/model_doc/roberta#transformers.RobertaForQuestionAnswering)
 
 ```
 # training:
-python src/roberta.py --train --data_path "data/curated/training_data" --model_path "model/xlnet.pt"
+python src/baseline/roberta.py --train --data_path "data/curated/training_data" --model_path "model/xlnet.pt"
 
 # testing:
-python src/roberta.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/roberta_pred.json"
+python src/baseline/roberta.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/roberta_pred.json"
 
 # kfold
-python roberta.py --train_kf --data_path "./data/curated/training_data" --model_path "./roberta_kf.pt" --metric_path "./roberta_kf_scores.json"
+python src/baseline/roberta.py --train_kf --data_path "data/curated/training_data" --model_path "model/roberta_kf.pt" --metric_path "output/roberta_kf_scores.json"
 ```
 
 ### 3. XLNet
-- Script: `src/xlnet.py`
+- Script: `src/baseline/xlnet.py`
 - Model: [XLNetForQuestionAnswering](https://huggingface.co/docs/transformers/model_doc/xlnet#transformers.XLNetForQuestionAnswering)  
 
 ```
 # training:
-python src/xlnet.py --train --data_path "data/curated/training_data" --model_path "model/xlnet.pt"
+python src/baseline/xlnet.py --train --data_path "data/curated/training_data" --model_path "model/xlnet.pt"
 
 # testing:
-python src/xlnet.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/xlnet_pred.json"
+python src/baseline/xlnet.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output"
+
+# kfold
+python src/baseline/xlnet.py --train_kf --data_path "data/curated/training_data" --model_path "model/xlnet_kf.pt" --metric_path "output/xlnet_kf_scores.json"
 ```
 
 ### 4. biLSTM
-- Script: `src/bilstm_bert.py`
+- Script: `src/baseline/bilstm_bert.py`
 - Model: biLSTM-BERT
 
 ```
 # training:
-python src/bilstm_bert.py --train --train_path "data/curated/training_data/" --model_path "model/bilstm.pt"
+python src/baseline/bilstm_bert.py --train --train_path "data/curated/training_data" --model_path "model/bilstm.pt"
 
-# testing:
-python src/bilstm_bert.py --test --test_path "data/curated/test_data/" --model_path "model/bilstm.pt"
+# testing
+python src/baseline/bilstm_bert.py --test --test_path "data/curated/test_data" --model_path "model/bilstm.pt" --output_path "output/bilstm_pred.json" --score_path "output/bilstm_scores.json"
+
+# kfold
+python src/baseline/bilstm_bert.py --train_kf --train_path "data/curated/training_data" --model_path "model/bilstm.pt" --metric_path "output/bilstm_metrics.json"
 ```
 
 ## Ensemble Models
@@ -103,7 +109,7 @@ Similar to maximum score, but instead of extracting the max score for common ind
 Run the following to get predictions from our ensemble models:
 ```
 # for maximum score
-python src/ensemble.py\
+python src/ensemble/ensemble.py\
         --maximum\
         --data_path "data/curated/test_data"\
         --roberta_path "model/roberta.pt"\
@@ -111,7 +117,7 @@ python src/ensemble.py\
         --output_path "output/ensemble_max_pred.json"
 
 # for multiplicative score
-python src/ensemble.py\
+python src/ensemble/ensemble.py\
         --multiplicative\
         --data_path "data/curated/test_data"\
         --roberta_path "model/roberta.pt"\
@@ -129,20 +135,31 @@ In this approach, we will deploy the Optuna framework for hyperparameter optimsa
 
 ```
 # Part A: Training on train set (80% of train-v1.1.json)
-python ensemble_unequal_optuna.py --train --roberta --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
-python ensemble_unequal_optuna.py --train --xlnet --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
+python src/ensemble/ensemble_unequal_optuna.py --train --roberta --data_path "data/curated/ensemble_data/train" --xlnet_path "model/xlnet_optuna.pt" --roberta_path "model/roberta_optuna.pt" --xlnet_dict "output/xlnet.json" --roberta_dict "output/roberta.json"
+python src/ensemble/ensemble_unequal_optuna.py --train --xlnet --data_path "data/curated/ensemble_data/train" --xlnet_path "model/xlnet_optuna.pt" --roberta_path "model/roberta_optuna.pt" --xlnet_dict "output/xlnet.json" --roberta_dict "output/roberta.json"
 
 # Part B: Obtaining candidates for validation set (20% of train-v1.1.json)
-python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
-python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
+python src/ensemble/ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "data/curated/ensemble_data/val" --xlnet_path "model/xlnet_optuna.pt" --roberta_path "model/roberta_optuna.pt" --xlnet_dict "output/xlnet_val.json" --roberta_dict "output/roberta_val.json"
+python src/ensemble/ensemble_unequal_optuna.py --get_candidates --roberta --data_path "data/curated/ensemble_data/val" --xlnet_path "model/xlnet_optuna.pt" --roberta_path "model/roberta_optuna.pt" --xlnet_dict "output/xlnet_val.json" --roberta_dict "output/roberta_val.json"
 
 # Part C: Obtaining candidates for test set and perform weighting based on Optuna weights
-python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_unequal_optuna.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
+python src/ensemble/ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "data/curated/test_data" --xlnet_path "model/xlnet_optuna.pt" --roberta_path "model/roberta_optuna.pt" --xlnet_dict "output/xlnet_test.json" --roberta_dict "output/roberta_test.json"
+python src/ensemble/ensemble_unequal_optuna.py --get_candidates --roberta --data_path "data/curated/test_data" --xlnet_path "model/xlnet_optuna.pt" --roberta_path "model/roberta_optuna.pt" --xlnet_dict "output/xlnet_test.json" --roberta_dict "output/roberta_test.json"
+python src/ensemble/ensemble_unequal_optuna.py --test --xlnet_dict "output/xlnet_test.json" --roberta_dict "output/roberta_test.json" --output_path "output/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
 ```
 > Note that training of both models (as well as getting candidates) cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
 
+**4. Weighting based on Optuna**  
+```
+to add in
+```
+### Max Voting
+
+```
+To add in
+```
+
+```
 ## Directory Structure
 To navigate around this repository, you can refer to the directory tree below:
 ```
