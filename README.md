@@ -48,7 +48,7 @@ python src/evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 Using pretrained weights
 
 # testing:
-python src/baseline/bert/test.py --data_file "data/curated/test_data/" --model_path "src/baseline/bert/model/" --output_file "output/bert_squad_pred.json"
+python src/baseline/bert/test.py --test --question_input "data/curated/test_data/question" --context_input "data/curated/test_data/context" --output_file "output/bert_squad_pred.json"
 ```
 
 ### 2. RoBERTa
@@ -57,10 +57,10 @@ python src/baseline/bert/test.py --data_file "data/curated/test_data/" --model_p
 
 ```
 # training:
-python src/baseline/roberta.py --train --data_path "data/curated/training_data" --model_path "model/xlnet.pt"
+python src/baseline/roberta.py --train --data_path "data/curated/training_data" --model_path "model/roberta.pt"
 
 # testing:
-python src/baseline/roberta.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/roberta_pred.json"
+python src/baseline/roberta.py --test --data_path "data/curated/test_data" --model_path "model/roberta.pt" --output_path "output/roberta_pred.json"
 
 # kfold
 python src/baseline/roberta.py --train_kf --data_path "data/curated/training_data" --model_path "model/roberta_kf.pt" --metric_path "intermediate/roberta_kf_scores.json"
@@ -109,7 +109,7 @@ Similar to maximum score, but instead of extracting the max score for common ind
 Run the following to get predictions from our ensemble models:
 ```
 # for maximum score
-python src/ensemble/ensemble.py\
+python src/ensemble/ensemble_equal.py\
         --maximum\
         --data_path "data/curated/test_data"\
         --roberta_path "model/roberta.pt"\
@@ -117,7 +117,7 @@ python src/ensemble/ensemble.py\
         --output_path "output/ensemble_max_pred.json"
 
 # for multiplicative score
-python src/ensemble/ensemble.py\
+python src/ensemble/ensemble_equal.py\
         --multiplicative\
         --data_path "data/curated/test_data"\
         --roberta_path "model/roberta.pt"\
@@ -148,10 +148,13 @@ python src/ensemble/ensemble_unequal_optuna.py --get_candidates --roberta --data
 python src/ensemble/ensemble_unequal_optuna.py --test --xlnet_dict "intermediate/xlnet_test.json" --roberta_dict "intermediate/roberta_test.json" --output_path "output/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
 ```
 > Note that training of both models (as well as getting candidates) cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
+> Note that Optuna trials are performed in *ensemble_optuna.ipynb*
 
 **4. Weighting based on CAWPE**  
+In this approach, we follow the unequal weighting scheme as proposed in the cross-validation accuracy weighted probabilistic ensemble (CAWPE). We used k-fold CV to obtain an averaged accuracy metric, which are then exponentiated by a chosen alpha value to magnify differences in competence of each model.
+
 ```
-to add in
+python src/ensemble/ensemble_unequal.py --test --xlnet_dict "intermediate/xlnet_test.json" --roberta_dict "intermediate/roberta_test.json" --xlnet_acc "intermediate/xlnet_kf_scores.json" --roberta_acc "intermediate/roberta_kf_scores.json" --output_path "output"
 ```
 
 ### Max Voting
@@ -206,23 +209,26 @@ To navigate around this repository, you can refer to the directory tree below:
 |    ├── roberta_kf.pt
 |    └── xlnet_kf.pt
 ├── output
-|    ├── bert_squad_pred.json
+|    ├── bert_pred.json
 |    ├── bilstm_pred.json
 |    ├── ensemble_max_pred.json
 |    ├── ensemble_mul_pred.json
 |    ├── ensemble_optuna_pred.json
 |    ├── ensemble_max_voting_pred.json
-|    ├── robert_pred.json
-|    └── xlnet_pred.json
+|    ├── unequal_weight_fixed_pred.json
+|    ├── unequal_weight_auto_pred.json
+|    ├── unequal_weight_equal_pred.json
+|    ├── roberta_pred.json
+|    └── xlnet_pred_top.json
 ├── src
 |    ├── preprocessing.py
 |    ├── evaluate-v2.0.py
-|    ├── bert
-|    |    ├── testing.py
 |    ├── baseline
 |    |    ├── bilstm_bert.py
 |    |    ├── roberta.py
-|    |    └── xlnet.py
+|    |    ├── xlnet.py
+|    |    └── bert
+|               └── test.py
 |    └── ensemble
 |         ├── ensemble_equal_weighting.py
 |         ├── ensemble_optuna.ipynb
