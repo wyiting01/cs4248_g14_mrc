@@ -363,7 +363,8 @@ def main(args):
         metric_sums = {'acc': 0, 'f1': 0}
 
         for fold, (train_index, test_index) in enumerate(kf.split(squad_train)):
-            fold_metrics = cross_val_worker(fold, train_index, test_index, squad_train, model, device, model_path)
+            kf_model = RobertaForQuestionAnswering.from_pretrained('roberta-base').to(device)
+            fold_metrics = cross_val_worker(fold, train_index, test_index, squad_train, kf_model, device, model_path)
 
             print(fold_metrics)
 

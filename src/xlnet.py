@@ -381,7 +381,8 @@ def main(args):
 
         for fold, (train_index, test_index) in enumerate(kf.split(squad_train)):
             #cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path=None, batch_size=16, collate_fn=None)
-            fold_metrics = cross_val_worker(fold, train_index=train_index, test_index=test_index, dataset=squad_train, model=model, device=device, model_path=model_path)
+            kf_model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
+            fold_metrics = cross_val_worker(fold, train_index=train_index, test_index=test_index, dataset=squad_train, model=kf_model, device=device, model_path=model_path)
             print(fold_metrics)
 
             for key in metric_sums:
