@@ -6,8 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
+from sklearn.model_selection import KFold
 
 torch.manual_seed(0)
 
@@ -210,6 +211,20 @@ def train(model, dataset, batch_size=16, learning_rate=5e-5, num_epoch=10, devic
 
     print('Model saved in ', model_path)
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
+    #return checkpoint
+
+def calc_f1(p, t):
+    p_tokens = p.split() # predicted
+    t_tokens = t.split() # true
+    common_tokens = set(p_tokens) & set(t_tokens)
+    if not p_tokens or not t_tokens:
+        return 0
+    precision = len(common_tokens) / len(p_tokens)
+    recall = len(common_tokens) / len(t_tokens)
+    if precision + recall == 0:
+        return 0
+    f1 = 2 * (precision * recall) / (precision + recall)
+    return f1
 
 def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     model.eval()
@@ -218,6 +233,10 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
     pred_all = {}
     pred_top = {}
+
+    metrics = {}
+    correct_pred = 0
+    f1_scores = []
 
     print("Making Predictions on Test Dataset")
     with torch.no_grad():
@@ -247,6 +266,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 offsets = offset_mapping[i]
                 ctxt = context[i]
                 qid = qids[i]
+                curr_answer = answer[i]
 
                 valid_answers = {}
                 for start in start_indexes:
@@ -276,13 +296,36 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
                 valid_answers = dict(sorted(valid_answers.items(), key=lambda x: float(x[1]), reverse=True)[:n_best_size])
                 if len(valid_answers) == 0:
-                    pred_all[qid] = ""
-                    pred_top[qid] = {}
+                    pred_all[qid] = {}
+                    pred_top[qid] = ""
                 else:
                     pred_all[qid] = valid_answers
                     pred_top[qid] = next(iter(valid_answers))
 
-    return pred_all, pred_top
+                # Calculate accuracy
+                if pred_top[qid] == curr_answer:
+                    correct_pred += 1
+
+                    # Calculate F1 score
+                f1 = calc_f1(pred_top[qid], curr_answer)
+                f1_scores.append(f1)
+
+
+    metrics['acc'] = correct_pred / len(f1_scores)
+    metrics['f1'] = sum(f1_scores) / len(f1_scores)
+
+    return pred_all, pred_top, metrics
+
+def cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path=None, batch_size=16, collate_fn=None): 
+    print(f"Processing fold {fold + 1}...")
+
+    # # Create subsets 
+    train_subset = Subset(dataset, train_index)
+    test_subset = Subset(dataset, test_index)
+
+    train(model, train_subset, device=device, model_path=model_path)
+    pred_all, pred_top, metrics = test(model, dataset=test_subset, device=device)
+    return metrics
 
 def main(args):
     
@@ -314,7 +357,7 @@ def main(args):
         max_answer_length = 30
 
         # use trained model to make predictions
-        pred_all, pred_top = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
+        pred_all, pred_top, metrics = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
     
         # write model prediction into json file
         with open(output_path + "/xlnet_pred_all.json", 'w') as f:
@@ -325,13 +368,40 @@ def main(args):
 
         print('Model predictions saved in ', output_path)
 
+    if args.train_kf:
+        k=5
+
+        train_path, metric_path, model_path = args.data_path, args.metric_path, args.model_path
+
+        squad_train = SquadDataset(train_path)
+
+        kf = KFold(n_splits=k, shuffle=True, random_state=42)
+
+        metric_sums = {'acc': 0, 'f1': 0}
+
+        for fold, (train_index, test_index) in enumerate(kf.split(squad_train)):
+            #cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path=None, batch_size=16, collate_fn=None)
+            kf_model = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
+            fold_metrics = cross_val_worker(fold, train_index=train_index, test_index=test_index, dataset=squad_train, model=kf_model, device=device, model_path=model_path)
+            print(fold_metrics)
+
+            for key in metric_sums:
+                metric_sums[key] += fold_metrics[key]
+
+        cval_metrics = {metric: total / k for metric, total in metric_sums.items()}
+
+        json.dump(cval_metrics, open(metric_path,"w"), ensure_ascii=False, indent=4)
+        
+
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', default=False, action='store_true', help='train the model')
     parser.add_argument('--test', default=False, action='store_true', help='test the model')
+    parser.add_argument('--train_kf', default=False, action='store_true', help='perform kfold on model')
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--model_path', help='path to save trained model')
     parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
+    parser.add_argument('--metric_path', default="xlnet_metrics.json", help='path to model metrics from cv')
     return parser.parse_args()
 
 if __name__ == "__main__":

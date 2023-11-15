@@ -6,8 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from transformers import RobertaTokenizerFast, RobertaForQuestionAnswering
+from sklearn.model_selection import KFold
 
 torch.manual_seed(0)
 
@@ -208,12 +209,29 @@ def train(model, dataset, batch_size=16, learning_rate=5e-5, num_epoch=10, devic
     print('Model saved in ', model_path)
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
 
+def calc_f1(p, t):
+    p_tokens = p.split() # predicted
+    t_tokens = t.split() # true
+    common_tokens = set(p_tokens) & set(t_tokens)
+    if not p_tokens or not t_tokens:
+        return 0
+    precision = len(common_tokens) / len(p_tokens)
+    recall = len(common_tokens) / len(t_tokens)
+    if precision + recall == 0:
+        return 0
+    f1 = 2 * (precision * recall) / (precision + recall)
+    return f1
+
 def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     model.eval()
 
     test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
 
     pred = {}
+
+    metrics = {}
+    correct_pred = 0
+    f1_scores = []
 
     print("Making Predictions on Test Dataset")
     with torch.no_grad():
@@ -272,7 +290,29 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
                 else:
                     pred[qid] = valid_answers[0]['text']
 
-    return pred
+                # Calculate accuracy
+                if pred[qid] == curr_ans:
+                    correct_pred += 1
+
+                    # Calculate F1 score
+                f1 = calc_f1(pred[qid], curr_ans)
+                f1_scores.append(f1)
+
+    metrics['acc'] = correct_pred / len(f1_scores)
+    metrics['f1'] = sum(f1_scores) / len(f1_scores)
+
+    return pred, metrics
+
+def cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path=None, batch_size=16, collate_fn=None): 
+    print(f"Processing fold {fold + 1}...")
+
+    # # Create subsets 
+    train_subset = Subset(dataset, train_index)
+    test_subset = Subset(dataset, test_index)
+
+    train(model, train_subset, device=device, model_path=model_path)
+    pred, metrics = test(model, dataset=test_subset, device=device)
+    return metrics
 
 def main(args):
     
@@ -312,13 +352,38 @@ def main(args):
 
         print('Model predictions saved in ', output_path)
 
+    if args.train_kf:
+        k=5
+        train_path, metric_path, model_path = args.data_path, args.metric_path, args.model_path
+
+        squad_train = SquadDataset(train_path)
+
+        kf = KFold(n_splits=k, shuffle=True, random_state=42)
+
+        metric_sums = {'acc': 0, 'f1': 0}
+
+        for fold, (train_index, test_index) in enumerate(kf.split(squad_train)):
+            kf_model = RobertaForQuestionAnswering.from_pretrained('roberta-base').to(device)
+            fold_metrics = cross_val_worker(fold, train_index, test_index, squad_train, kf_model, device, model_path)
+
+            print(fold_metrics)
+
+            for key in metric_sums:
+                metric_sums[key] += fold_metrics[key]
+
+        cval_metrics = {metric: total / k for metric, total in metric_sums.items()}
+
+        json.dump(cval_metrics, open(metric_path,"w"), ensure_ascii=False, indent=4)
+        
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', default=False, action='store_true', help='train the model')
     parser.add_argument('--test', default=False, action='store_true', help='test the model')
+    parser.add_argument('--train_kf', default=False, action='store_true', help='perform kfold on model')
     parser.add_argument('--data_path', help='path to the dataset file')
     parser.add_argument('--model_path', help='path to save trained model')
     parser.add_argument('--output_path', default="pred.json", help='path to model_prediction')
+    parser.add_argument('--metric_path', default="xlnet_metrics.json", help='path to model metrics from cv')
     return parser.parse_args()
 
 if __name__ == "__main__":
