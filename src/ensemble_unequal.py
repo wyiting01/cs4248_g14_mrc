@@ -13,7 +13,7 @@ python ensemble_unequal.py --get_candidates --roberta --data_path "../data/curat
 python ensemble_unequal.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.39 --roberta_weight 0.61
 
 - to obtan results of the ensemble method with unequal probabiltiy weighting
-python3 src/ensemble_unequal.py --test --xlnet_dict src/xlnet_val.json --roberta_dict src/roberta_val.json --output_path src 
+python3 src/ensemble_unequal.py --test --xlnet_dict src/xlnet_val.json --roberta_dict src/roberta_val.json --xlnet_acc src/xlnet_kf_scores.json --roberta_acc src/roberta_kf_scores.json --output_path src 
 
 '''
 
@@ -293,14 +293,14 @@ def main(args):
 
         all_preds = [roberta_pred, xlnet_pred]
 
-        # a1 = open(args.xlnet_dict)
-        # xlnet_acc = json.load(a1)
-        # a2 = open(args.roberta_dict)
-        # roberta_acc = json.load(a2)
+        a1 = open(args.xlnet_acc)
+        xlnet_acc = json.load(a1)
+        a2 = open(args.roberta_acc)
+        roberta_acc = json.load(a2)
 
-        # accs = [xlnet_acc, roberta_acc, 0.87]
+        accs = [xlnet_acc["acc"], roberta_acc["acc"]]
 
-        accs = [0.88, 0.89]
+        # accs = [0.88, 0.89]
 
         fixed_alpha = 4
         auto_alpha = calc_autotune_alpha(accs)
@@ -332,6 +332,8 @@ def get_arguments():
     parser.add_argument('--roberta_path', help='path to save trained roberta model')
     parser.add_argument('--xlnet_dict', help='path to save xlnet pred on val/test data')
     parser.add_argument('--roberta_dict', help='path to save roberta pred on val/test data')
+    parser.add_argument('--xlnet_acc', help='path to saved xlnet accuracies after kfolds')
+    parser.add_argument('--roberta_acc', help='path to saved roberta accuracies after kfolds')
     parser.add_argument('--output_path', help='path to save final prediction for test data')
 
     return parser.parse_args()
