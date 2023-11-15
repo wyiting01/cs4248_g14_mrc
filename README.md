@@ -40,7 +40,7 @@ python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 ## Baseline Models
 
 ### 1. BERT-SQuAD
-- Script: `src/bert.py`
+- Folder: `src/bert`
 - Model: [BERT-SQuAD](https://github.com/kamalkraj/BERT-SQuAD/tree/master)
 
 ```
@@ -48,7 +48,7 @@ python evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 Using pretrained weights
 
 # testing:
-python src/bert/test.py --data_file *path to data file* --output_file *output file* --model_path *path to bert model folder*
+python src/bert/test.py --test --question_input "../data/curated/test_data/question" --context_input "../data/curated/test_data/context" --output_file "./pred.json"
 ```
 
 ### 2. RoBERTa
@@ -61,6 +61,9 @@ python src/roberta.py --train --data_path "data/curated/training_data" --model_p
 
 # testing:
 python src/roberta.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/roberta_pred.json"
+
+# kfold
+python roberta.py --train_kf --data_path "./data/curated/training_data" --model_path "./roberta_kf.pt" --metric_path "./roberta_kf_scores.json"
 ```
 
 ### 3. XLNet
