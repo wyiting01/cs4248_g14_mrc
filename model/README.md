@@ -1,0 +1,1 @@
+This folder contains all the model weights that we obtained from training.
