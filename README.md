@@ -48,7 +48,7 @@ python src/evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 Using pretrained weights
 
 # testing:
-python src/baseline/bert/test.py --test --question_input "data/curated/test_data/question" --context_input "data/curated/test_data/context" --output_file "output/bert_squad_pred.json"
+python src/baseline/bert/test.py --data_file "data/curated/test_data/" --model_path "src/baseline/bert/model/" --output_file "output/bert_squad_pred.json"
 ```
 
 ### 2. RoBERTa
