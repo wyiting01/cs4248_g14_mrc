@@ -148,7 +148,7 @@ python src/ensemble/ensemble_unequal_optuna.py --get_candidates --roberta --data
 python src/ensemble/ensemble_unequal_optuna.py --test --xlnet_dict "intermediate/xlnet_test.json" --roberta_dict "intermediate/roberta_test.json" --output_path "output/ensemble_optuna_pred.json" --xlnet_weight 0.41 --roberta_weight 0.59
 ```
 > Note that training of both models (as well as getting candidates) cannot be performed at the same time due to the limitation of the cluster, hence running them separately is required.
-> Note that Optuna trials are performed in *ensemble_optuna.ipynb*
+> Note that Optuna trials are performed in `ensemble_optuna.ipynb`
 
 **4. Weighting based on CAWPE**  
 In this approach, we follow the unequal weighting scheme as proposed in the cross-validation accuracy weighted probabilistic ensemble (CAWPE). We used k-fold CV to obtain an averaged accuracy metric, which are then exponentiated by a chosen alpha value to magnify differences in competence of each model.
