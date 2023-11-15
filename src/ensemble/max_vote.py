@@ -1,23 +1,3 @@
-import argparse
-import datetime
-import json
-import numpy as np
-import torch
-import torch.nn as nn
-import argparse
-import sys
-import torch.nn.functional as F
-import xlnet
-
-from torch.optim import AdamW
-from torch.utils.data import Dataset, DataLoader
-from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
-
-from bert.bert_model import QA
-from bilstm_bert import *
-from collections import Counter
-from xlnet import SquadDataset
-
 '''
 Need to install libraries for hyperopt, numpy, sklearn, transformers, BERT:
 
@@ -29,10 +9,38 @@ pip install transformers
 pip install pytorch_transformers
 
 To run this file, use the command:
-python src/max_vote.py --data_path data/curated/test_data --bert_path bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path allMaxVoteAns.json --final_output_path maxVoteAns.json
+python src/ensemble/max_vote.py --data_path data/curated/test_data --bert_path src/baseline/bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path output/maxVoteAns.json
+
+From src/ensemble:
+python max_vote.py --data_path ../../data/curated/test_data --bert_path ../baseline/bert/model --xlnet_model ../../model/xlnet.pt --bilstm_model ../../model/bilstm.pt --output_path ../../output/maxVoteAns.json
 
 (Note: This is from main folder cs4248_g14_mrc, paths will change relative to where you run the command from.)
 '''
+
+import argparse
+import datetime
+import json
+import numpy as np
+import os
+import torch
+import torch.nn as nn
+import argparse
+import sys
+import torch.nn.functional as F
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+ancestor_relative_path = os.path.join('..', 'baseline')
+ancestor_abs_path = os.path.abspath(os.path.join(current_dir, ancestor_relative_path))
+sys.path.append(ancestor_abs_path)
+
+from torch.optim import AdamW
+from torch.utils.data import Dataset, DataLoader
+from transformers import XLNetForQuestionAnswering, XLNetTokenizerFast
+
+from bert.bert_model import QA
+from bilstm_bert import *
+from collections import Counter
+from xlnet import SquadDataset
 
 torch.manual_seed(0)
 
@@ -65,20 +73,16 @@ def bi_collate_fn(batch):
 
 #### START OF PREDICTION ####
 def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
-    print("Beginning Prediction")
+    print("Loading data...")
     pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
     # Path is dependent on slurm job, may need to change this depending on where you start running max_vote.py.
     bert = QA(args.bert_path)
 
     bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False, collate_fn=bi_collate_fn)
 
-    final_pred = {}
-    final_pred_all = {}
+    final_preds = {}
 
-    correct_pred = 0
-
-    total = len(bilstm_dataset.questions)
-
+    print("Beginning predictions...")
     with torch.no_grad():
         print("Running biLSTM")
         quesAns = {}
@@ -92,7 +96,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
             contexts = batch.get("contexts")
             offset_mappings = batch.get("offset_mappings")
             
-            start_logits, end_logits = model(input_ids, attention_mask)
+            start_logits, end_logits = bilstm_model(input_ids, attention_mask)
 
             start_logits = start_logits.cpu().detach().numpy() #grad included
             end_logits = end_logits.cpu().detach().numpy()
@@ -142,12 +146,10 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
             output = xlnet_model(input_ids=input_ids, attention_mask=attention_mask)
 
             for i in range(len(input_ids)):
-                print(question[i])
                 # BERT MODEL
                 bert_pred = bert.predict_full(context[i], question[i])
 
                 # XLNET  Model
-                pred = {}
                 start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
                 end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
                 start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
@@ -229,31 +231,18 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
                             pos[bert_pred[i]['answer']] = bert_pred[i]['confidence']
                 top_answer = max(pos, key=pos.get)
 
-                correct_answer = answer[i]
-                # Calculate accuracy
-                if top_answer == correct_ans:
-                    correct_pred += 1
+                if top_answer:
+                    final_preds[qid] = top_answer
 
-                # Calculate F1 score
-                f1 = calc_f1(top_answer, correct_ans)
-                f1_scores.append(f1)
+                else:
+                    final_preds[qid] = ""
 
-                final_pred[qid] = top_answer
-                final_pred_all[qid] = pos
-                break
-            break
-
-    exact_match = correct_pred / total
-    f1 = sum(f1_scores) / total
-
-    print(f"Exact match: {exact_match}")
-    print(f"f1: {f1}")
-    return final_pred, final_pred_all
+    return final_preds
 
 
 def main(args):
     output_path = args.output_path
-    final_output_path = args.final_output_path
+    print("Initialising models...")
     xlNetData = SquadDataset(args.data_path)
     xlNetModel = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
     checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
@@ -264,10 +253,9 @@ def main(args):
     bilstmCheckpoint = torch.load(args.bilstm_model)
     bilstm_model.load_state_dict(bilstmCheckpoint["model_state_dict"])
 
-    final_pred, final_pred_all = predict(xlNetData, xlNetModel, bilstm_dataset, bilstm_model, 20)
+    final_preds = predict(xlNetData, xlNetModel, bilstm_dataset, bilstm_model, 20)
 
-    json.dump(final_pred_all, open(output_path,"w"), ensure_ascii=False, indent=4)
-    json.dump(final_pred, open(final_output_path, "w"), ensure_ascii=False, indent=4)
+    json.dump(final_preds, open(output_path, "w"), ensure_ascii=False, indent=4)
     return ans
 
 def get_arguments():
@@ -276,12 +264,10 @@ def get_arguments():
     parser.add_argument('--bert_path', required=True, help='path to bert model')
     parser.add_argument('--xlnet_model', required=True, help='path to xlnet model')
     parser.add_argument('--bilstm_model', required=True, help='path to bilstm model')
-    parser.add_argument('--output_path', required=True, help='path to all outputs')
-    parser.add_argument('--final_output_path', required=True, help= 'path for all single outputs')
+    parser.add_argument('--output_path', required=True, help= 'path for all single outputs')
     return parser.parse_args()
 
 if __name__ == "__main__":
-    #print(sys.path)
     args = get_arguments()
     main(args)
     print("Completed!")
