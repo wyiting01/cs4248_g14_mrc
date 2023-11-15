@@ -36,6 +36,33 @@ python src/max_vote.py --data_path data/curated/test_data --bert_path bert/model
 
 torch.manual_seed(0)
 
+# Pad to the right side
+def bi_collate_fn(batch):
+    input_ids = [item["input_ids"] for item in batch]
+    attention_masks = [item["attention_mask"] for item in batch]
+    start_positions = [item["start_position"] for item in batch]
+    end_positions = [item["end_position"] for item in batch]
+    question_ids = [item["question_ids"] for item in batch]
+    contexts = [item["contexts"] for item in batch]
+    correct_answers = [item["correct_answers"] for item in batch]
+    offset_mappings = [item["offset_mappings"] for item in batch]
+
+    input_ids = pad_sequence(input_ids, batch_first=True)
+    attention_masks = pad_sequence(attention_masks, batch_first=True)
+    
+    padded_offset_mappings = pad_sequence(offset_mappings, batch_first=True, padding_value=0)
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_masks,
+        "start_positions": torch.tensor(start_positions).clone().detach(),
+        "end_positions": torch.tensor(end_positions).clone().detach(),
+        "offset_mappings": padded_offset_mappings,
+        "question_ids": question_ids,
+        "contexts": contexts,
+        "correct_answers": correct_answers
+    }
+
 #### START OF PREDICTION ####
 def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
     print("Beginning Prediction")
@@ -43,7 +70,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
     # Path is dependent on slurm job, may need to change this depending on where you start running max_vote.py.
     bert = QA(args.bert_path)
 
-    bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False)
+    bilstm_pred_data = DataLoader(dataset=bilstm_dataset, batch_size=16, shuffle=False, collate_fn=bi_collate_fn)
 
     final_pred = {}
     final_pred_all = {}
@@ -55,6 +82,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
     with torch.no_grad():
         print("Running biLSTM")
         quesAns = {}
+        scores = {}
         for batch in bilstm_pred_data:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
@@ -87,7 +115,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
 
                 # sort by top scores
                 answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
-                pred[qid] = answers[0][3] if answers else ""
+                quesAns[qid] = answers[0][3] if answers else ""
 
                 # Save all n_best_size answers' scores
                 scores[qid] = [
