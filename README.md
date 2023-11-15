@@ -212,3 +212,4 @@ To navigate around this repository, you can refer to the directory tree below:
 
 ## References:
 1. [Hugging Face Preprocessing for Modeling](https://huggingface.co/docs/transformers/tasks/question_answering)
+2. [BERT-SQuAD](https://github.com/kamalkraj/BERT-SQuAD/tree/master)
