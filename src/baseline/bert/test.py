@@ -41,6 +41,7 @@ def main():
     answers = {}
 
     bert = QA(args.model_path)
+    print("Beginning")
 
     for i in range(len(questions)):
         curr_ans = bert.predict(contexts[i], questions[i])
