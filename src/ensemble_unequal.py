@@ -1,19 +1,6 @@
 '''
-- to train xlnet and roberta on 80% of train-v1.1.json
-python ensemble_unequal_optuna.py --train --roberta --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
-python ensemble_unequal_optuna.py --train --xlnet --data_path "../data/curated/ensemble_data/train" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../xlnet.json" --roberta_dict "../roberta.json"
-
-- to obtain the possible candidates along their scores for validation data (20% of train-v1.1.json) for optuna trials to determine optimal weights (refer to ensemble_optuna.ipynb)
-python ensemble_unequal_optuna.py --get_candidates --xlnet --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
-python ensemble_unequal_optuna.py --get_candidates --roberta --data_path "../data/curated/ensemble_data/val" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_val.json" --roberta_dict "../ensemble/roberta_val.json"
-
-- to obtain the possible candidates along their scores for test data and apply optimal weights to obtain final prediction
-python ensemble_unequal.py --get_candidates --xlnet --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_unequal.py --get_candidates --roberta --data_path "../data/curated/test_data" --xlnet_path "../model/xlnet.pt" --roberta_path "../model/roberta.pt" --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json"
-python ensemble_unequal.py --test --xlnet_dict "../ensemble/xlnet_test.json" --roberta_dict "../ensemble/roberta_test.json" --output_path "../ensemble/ensemble_optuna_pred.json" --xlnet_weight 0.39 --roberta_weight 0.61
-
-- to obtan results of the ensemble method with unequal probabiltiy weighting
-python3 src/ensemble_unequal.py --test --xlnet_dict src/xlnet_val.json --roberta_dict src/roberta_val.json --output_path src 
+- to obtain results of the ensemble method with unequal probabiltiy weighting
+python3 src/ensemble_unequal.py --test --xlnet_dict src/xlnet_val.json --roberta_dict src/roberta_val.json --xlnet_acc src/xlnet_kf_scores.json --roberta_acc src/roberta_kf_scores.json --output_path src 
 
 '''
 
@@ -37,117 +24,6 @@ from transformers import RobertaTokenizerFast, RobertaForQuestionAnswering, XLNe
 import xlnet
 import albert
 import roberta
-
-def test_roberta(model, dataset, n_best_size=20, device='cpu') -> dict:
-    model.eval()
-
-    test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
-
-    pred = {}
-
-    print("Making Predictions on Test Dataset")
-    with torch.no_grad():
-        for data in test_dataloader:
-            input_ids = data["input_ids"].to(device)
-            attention_mask = data["attention_mask"].to(device)
-            start = data["start_positions"].to(device)
-            end = data["end_positions"].to(device)
-
-            output = model(input_ids=input_ids, attention_mask=attention_mask)
-
-            offset_mapping = data["offset_mapping"]
-            context = data["og_contexts"]
-            answer = data["og_answers"]
-            question = data["og_questions"]
-            qids = data["og_question_ids"]
-
-            for i in range(len(input_ids)):
-
-                start_logits = F.softmax(output.start_logits[i], dim=0).cpu().detach().numpy()
-                end_logits = F.softmax(output.end_logits[i], dim=0).cpu().detach().numpy()
-                start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
-                end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
-
-                offsets = offset_mapping[i]
-                ctxt = context[i]
-                qid = qids[i]
-                ans = answer[i]
-
-                start_candidates = {}
-                end_candidates = {}
-
-                for start in start_indexes:
-                  logits = start_logits[start]
-                  start_char = offsets[start][0].item()
-                  if start_candidates.get(start_char) == None or float(start_candidates.get(start_char)) < logits:
-                    start_candidates[start_char] = str(logits)
-
-                for end in end_indexes:
-                  logits = end_logits[end]
-                  end_char = offsets[end][1].item()
-                  if end_candidates.get(end_char) == None or float(end_candidates.get(end_char)) < logits:
-                    end_candidates[end_char] = str(logits)
-
-                pred[qid] = {"start": start_candidates, "end": end_candidates, "answers": ans, "context": ctxt}
-
-    return pred
-
-def test_xlnet(model, dataset, n_best_size=20, device='cpu') -> dict:
-    model.eval()
-
-    test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
-
-    pred = {}
-
-    print("Making Predictions on Test Dataset")
-    with torch.no_grad():
-        for data in test_dataloader:
-            input_ids = data["input_ids"].to(device)
-            attention_mask = data["attention_mask"].to(device)
-            start = data["start_positions"].to(device)
-            end = data["end_positions"].to(device)
-
-            output = model(input_ids=input_ids, attention_mask=attention_mask)
-
-            offset_mapping = data["offset_mapping"]
-            context = data["og_contexts"]
-            answer = data["og_answers"]
-            question = data["og_questions"]
-            qids = data["og_question_ids"]
-
-            for i in range(len(input_ids)):
-                start_logits = output.start_top_log_probs[i].cpu().detach().numpy()
-                end_logits = output.end_top_log_probs[i].cpu().detach().numpy()
-                start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
-                end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
-
-                start_top_indexes = output.start_top_index[i]
-                end_top_indexes = output.end_top_index[i]
-
-                offsets = offset_mapping[i]
-                ctxt = context[i]
-                qid = qids[i]
-                ans = answer[i]
-
-                start_candidates = {}
-                end_candidates = {}
-                for start in start_indexes:
-                  logits = start_logits[start]
-                  start_index = start_top_indexes[start]
-                  start_char = offsets[start_index][0].item()
-                  if start_candidates.get(start_char) == None or float(start_candidates.get(start_char)) < logits:
-                    start_candidates[start_char] = str(logits)
-
-                for end in end_indexes:
-                  logits = end_logits[end]
-                  end_index = end_top_indexes[end]
-                  end_char = offsets[end_index][1].item()
-                  if end_candidates.get(end_char) == None or float(end_candidates.get(end_char)) < logits:
-                    end_candidates[end_char] = str(logits)
-
-                pred[qid] = {"start": start_candidates, "end": end_candidates, "answers": ans, "context": ctxt}
-
-    return pred
 
 def calc_autotune_alpha(accs: list) -> int:
     '''
@@ -233,56 +109,7 @@ def post_processing(score_dict, max_answer_length=100):
 def main(args):
     
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    if args.train:
-        # specify hyperparameters
-        num_epoch = 2
-        batch_size = 16
-        learning_rate = 5e-5
-
-        if args.xlnet:
-            print("Initialising XLNet Model")
-            xlnet_model = XLNetForQuestionAnswering.from_pretrained("xlnet-base-cased").to(device)
-            xlnet_dataset = xlnet.SquadDataset(args.data_path)
-
-            # train the xlnet model
-            xlnet.train(model=xlnet_model, dataset=xlnet_dataset, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=args.xlnet_path)
-
-        if args.roberta:
-            print("Initialising roberta Model")
-            roberta_model = RobertaForQuestionAnswering.from_pretrained('roberta-base').to(device)
-            roberta_dataset = roberta.SquadDataset(args.data_path)
-
-            # train the roberta model
-            roberta.train(model=roberta_model, dataset=roberta_dataset, num_epoch=num_epoch, batch_size=batch_size, learning_rate=learning_rate, device=device, model_path=args.roberta_path)
-    
-    elif args.get_candidates:
-      
-        if args.roberta:
-        
-            roberta_model = RobertaForQuestionAnswering.from_pretrained('roberta-base').to(device)
-            roberta_checkpt = torch.load(args.roberta_path)
-            roberta_model.load_state_dict(roberta_checkpt['model_state_dict'])
-            roberta_validation = roberta.SquadDataset(args.data_path)
-
-            roberta_pred = test_roberta(roberta_model, roberta_validation, n_best_size=20, device=device)
-
-            with open(args.roberta_dict, 'w') as f:
-                json.dump(roberta_pred, f)
-
-        if args.xlnet:
-            
-            xlnet_model = XLNetForQuestionAnswering.from_pretrained("xlnet-base-cased").to(device)
-            xlnet_checkpt = torch.load(args.xlnet_path)
-            xlnet_model.load_state_dict(xlnet_checkpt['model_state_dict'])
-            xlnet_validation = xlnet.SquadDataset(args.data_path)
-
-            xlnet_pred = test_xlnet(xlnet_model, xlnet_validation, n_best_size=20, device=device)
-
-            with open(args.xlnet_dict, 'w') as f:
-                json.dump(xlnet_pred, f)
-    
-    elif args.test:
+    if args.test:
         output_path = args.output_path
 
         # all models 
@@ -293,14 +120,12 @@ def main(args):
 
         all_preds = [roberta_pred, xlnet_pred]
 
-        # a1 = open(args.xlnet_dict)
-        # xlnet_acc = json.load(a1)
-        # a2 = open(args.roberta_dict)
-        # roberta_acc = json.load(a2)
+        a1 = open(args.xlnet_acc)
+        xlnet_acc = json.load(a1)
+        a2 = open(args.roberta_acc)
+        roberta_acc = json.load(a2)
 
-        # accs = [xlnet_acc, roberta_acc, 0.87]
-
-        accs = [0.88, 0.89]
+        accs = [xlnet_acc["acc"], roberta_acc["acc"]]
 
         fixed_alpha = 4
         auto_alpha = calc_autotune_alpha(accs)
@@ -332,6 +157,8 @@ def get_arguments():
     parser.add_argument('--roberta_path', help='path to save trained roberta model')
     parser.add_argument('--xlnet_dict', help='path to save xlnet pred on val/test data')
     parser.add_argument('--roberta_dict', help='path to save roberta pred on val/test data')
+    parser.add_argument('--xlnet_acc', help='path to saved xlnet accuracies after kfolds')
+    parser.add_argument('--roberta_acc', help='path to saved roberta accuracies after kfolds')
     parser.add_argument('--output_path', help='path to save final prediction for test data')
 
     return parser.parse_args()
