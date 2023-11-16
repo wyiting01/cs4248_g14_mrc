@@ -221,7 +221,6 @@ To navigate around this repository, you can refer to the directory tree below:
 |    ├── ensemble_max_voting_pred.json
 |    ├── unequal_weight_fixed_pred.json
 |    ├── unequal_weight_auto_pred.json
-|    ├── unequal_weight_equal_pred.json
 |    ├── roberta_pred.json
 |    └── xlnet_pred.json
 ├── src
