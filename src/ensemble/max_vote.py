@@ -69,7 +69,7 @@ def bi_collate_fn(batch):
     }
 
 #### START OF PREDICTION ####
-def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size,device='cpu', max_answer_length = 30):
+def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size, device='cpu', max_answer_length = 30):
     print("Loading data...")
     pred_data = DataLoader(dataset=xlnetDataset, batch_size=16, shuffle=False)
     # Path is dependent on slurm job, may need to change this depending on where you start running max_vote.py.
@@ -89,21 +89,20 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
             attention_mask = batch["attention_mask"].to(device)
             start_positions = batch["start_positions"].to(device)
             end_positions = batch["end_positions"].to(device)
-            question_ids = batch.get("question_ids")
-            contexts = batch.get("contexts")
-            offset_mappings = batch.get("offset_mappings")
+            question_ids = batch["question_ids"]
+            contexts = batch["contexts"]
+            offset_mappings = batch["offset_mappings"]
+            correct_answers = batch["correct_answers"]
             
             start_logits, end_logits = bilstm_model(input_ids, attention_mask)
-
-            start_logits = start_logits.cpu().detach().numpy() #grad included
-            end_logits = end_logits.cpu().detach().numpy()
             
-            for i in range(len(input_ids)):
-                qid = question_ids[i]
-                ctxt = contexts[i]
-                start_logit = start_logits[i]
-                end_logit = end_logits[i]
-                offset = offset_mappings[i]
+            for j in range(len(input_ids)):
+                qid = question_ids[j]
+                ctxt = contexts[j]
+                start_logit = F.softmax(start_logits[j], dim=0).cpu().detach().numpy()
+                end_logit = F.softmax(end_logits[j], dim=0).cpu().detach().numpy()
+                offset = offset_mappings[j]
+                correct_ans = correct_answers[j]
                 answers = []
 
                 for start_index in range(len(start_logit)):
@@ -120,7 +119,7 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
 
                 # Save all n_best_size answers' scores
                 scores[qid] = [
-                    {"score": float(score), "start_logit": float(start_logits[i][start_idx]), "end_logit": float(end_logits[i][end_idx]), "text": text}
+                    {"score": float(score), "start_logit": float(start_logits[j][start_idx]), "end_logit": float(end_logits[j][end_idx]), "text": text}
                     for score, start_idx, end_idx, text in answers
                 ]
                 texts = []
@@ -239,19 +238,21 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
 
 
 def main(args):
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
     output_path = args.output_path
     print("Initialising models...")
     xlNetData = SquadDataset(args.data_path)
-    xlNetModel = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(torch.device('cpu'))
-    checkpoint = torch.load(args.xlnet_model, map_location=torch.device('cpu'))
+    xlNetModel = XLNetForQuestionAnswering.from_pretrained('xlnet-base-cased').to(device)
+    checkpoint = torch.load(args.xlnet_model, map_location=device)
     xlNetModel.load_state_dict(checkpoint["model_state_dict"])
 
     bilstm_dataset = biLSTMDataset(in_path=args.data_path)
-    bilstm_model = BERT_BiLSTM(64).to(torch.device('cpu'))
-    bilstmCheckpoint = torch.load(args.bilstm_model)
+    bilstm_model = BERT_BiLSTM(64).to(device)
+    bilstmCheckpoint = torch.load(args.bilstm_model, map_location=device)
     bilstm_model.load_state_dict(bilstmCheckpoint["model_state_dict"])
 
-    final_preds = predict(xlNetData, xlNetModel, bilstm_dataset, bilstm_model, 20)
+    final_preds = predict(xlnetDataset=xlNetData, xlnet_model=xlNetModel, bilstm_dataset=bilstm_dataset, bilstm_model=bilstm_model, n_best_size=20, device=device, max_answer_length=100)
 
     json.dump(final_preds, open(output_path, "w"), ensure_ascii=False, indent=4)
     return ans
