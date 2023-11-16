@@ -11,9 +11,6 @@ pip install pytorch_transformers
 To run this file, use the command:
 python src/ensemble/max_vote.py --data_path data/curated/test_data --bert_path src/baseline/bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path output/maxVoteAns.json
 
-From src/ensemble:
-python max_vote.py --data_path ../../data/curated/test_data --bert_path ../baseline/bert/model --xlnet_model ../../model/xlnet.pt --bilstm_model ../../model/bilstm.pt --output_path ../../output/maxVoteAns.json
-
 (Note: This is from main folder cs4248_g14_mrc, paths will change relative to where you run the command from.)
 '''
 
@@ -208,7 +205,8 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
                 for i in range(n_best_size):
                     predictions.append(bert_pred[i]['answer'])
 
-                bilstm_preds = quesAns[qid]
+                if quesAns[qid]:
+                    bilstm_preds = quesAns[qid]
                 predictions += bilstm_preds
 
                 predictions += valid_answers
