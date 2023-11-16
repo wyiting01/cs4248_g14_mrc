@@ -36,7 +36,7 @@ To run the evaluation script with model predictions `pred.json`, simply run the 
 ```
 python src/evaluate-v2.0.py data/raw/dev-v1.1.json output/pred.json
 ```
-> Note that `pred.json` can be replaced with any output json files containing the predictions of your target model found in `output/`
+> Note that `pred.json` can be replaced with any output json files containing the predictions of your target model found in `output/`  
 > Use of modified evaluation script `evaluate-v2.1.py` will handle any encoding/key-value errors
 
 ## Baseline Models
