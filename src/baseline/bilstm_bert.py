@@ -37,15 +37,12 @@ from transformers import BertTokenizerFast, BertModel
 
 # Default hyperparameters
 hidden_dim=64
-num_layers=2
-num_labels=10
 batch_size=20
 learning_rate=5e-5
 num_epoch=5
 dropout_rate=0.1
 seed = 0
 k = 5
-max_length = 0
 n_best_size= 5
 
 # Ensure no randomisation for every iteration of run.
@@ -586,6 +583,7 @@ def main(args):
         train(model, train_set, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device=device, model_path=model_path)
 
     if args.test:
+        model = BERT_BiLSTM(hidden_dim).to(device)
         test_path, output_path, score_path = args.test_path, args.output_path, args.score_path
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["model_state_dict"])
