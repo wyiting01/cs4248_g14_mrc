@@ -2,12 +2,11 @@ import argparse
 import json
 import numpy as np
 import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-import sys
-import os
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 ancestor_relative_path = os.path.join('..', 'baseline')
