@@ -5,7 +5,7 @@ Training Data: `data/raw/train-v1.1.json`
 Test Data: `data/raw/dev-v1.1.json`
 
 ### Data Preprocessing  
-We preprocess the json files by separating context, question, question id, answer and answer span into individual file. This preprocessing is applied to both `train-v1.1.json` and `dev-v1.1.json`.
+We preprocessed the data json files by separating context, question, question id, answer and answer span into individual file. This preprocessing is applied to both `train-v1.1.json` and `dev-v1.1.json`.
 
 To use our preprocessing script, we will need to specify some parameters as shown below:
 ```
