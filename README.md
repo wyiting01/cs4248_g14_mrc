@@ -24,19 +24,20 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 | BASELINE  | BERT-SQuAD             | 57.79564806054872                | 72.18288133527203               |
 |           | RoBERTa                | 81.20151371807                   | 88.41621816924753               |
 |           | XLNet                  | 75.34531693472091                | 84.06374401013184               |
-|           | biLSTM                 | TBC                              | TBC                             | 
+|           | biLSTM                 | 74.41882991088725                | 82.48893567082695               | 
 | ENSEMBLE  | Max Voting             | TBC                              | TBC                             |
 |           | Equal - Maximum        | 78.89309366130558                | 86.70557785319596               |
-|           | Equal - Multiplicative | <ins>**82.19489120151371**</ins> | <ins>**88.9101732833653**</ins> |
+|           | Equal - Multiplicative | 82.19489120151371                | 88.9101732833653                |
 |           | Unequal - Optuna       | 81.47587511825922                | 88.20920854244099               |
-|           | Unequal - CAWPE (fixed)| TBC                              | TBC                             |
-|           | Unequal - CAWPE (auto) | TBC                              | TBC                             |
+|           | Unequal - CAWPE (fixed)| 82.42194891201514                | 88.96254477083748               |
+|           | Unequal - CAWPE (auto) | <ins>**82.69631031220435**</ins> | <ins>**89.11858601649928**</ins>|
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
 python src/evaluate-v2.0.py data/raw/dev-v1.1.json output/pred.json
 ```
 > Note that `pred.json` can be replaced with any output json files containing the predictions of your target model found in `output/`
+> Use of modified evaluation script `evaluate-v2.1.py` will handle any encoding/key-value errors
 
 ## Baseline Models
 
@@ -149,7 +150,6 @@ In this approach, we follow the unequal weighting scheme as proposed in the cros
 # perform kfold for participating baseline models
 python src/baseline/roberta.py --train_kf --data_path "data/curated/training_data" --model_path "model/roberta_kf.pt" --metric_path "intermediate/roberta_kf_scores.json"
 python src/baseline/xlnet.py --train_kf --data_path "data/curated/training_data" --model_path "model/xlnet_kf.pt" --metric_path "intermediate/xlnet_kf_scores.json"
-python src/baseline/bilstm_bert.py --train_kf --train_path "data/curated/training_data" --model_path "model/bilstm.pt" --metric_path "intermediate/bilstm_metrics.json"
 
 # perform weighitng based on kfold average accuracy
 python src/ensemble/ensemble_unequal.py --test --xlnet_dict "intermediate/xlnet_test.json" --roberta_dict "intermediate/roberta_test.json" --xlnet_acc "intermediate/xlnet_kf_scores.json" --roberta_acc "intermediate/roberta_kf_scores.json" --output_path "output"
