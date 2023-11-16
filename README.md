@@ -160,10 +160,8 @@ This ensemble model aims to get the answer with the highest count from all 3 mod
 python src/ensemble/max_vote.py --data_path data/curated/test_data --bert_path src/baseline/bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path output/maxVoteAns.json
 ```
 
-```
 ## Directory Structure
 To navigate around this repository, you can refer to the directory tree below:
-```
 
 ```
 ├── data
