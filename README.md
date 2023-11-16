@@ -29,7 +29,8 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 |           | Equal - Maximum        | 78.89309366130558                | 86.70557785319596               |
 |           | Equal - Multiplicative | <ins>**82.19489120151371**</ins> | <ins>**88.9101732833653**</ins> |
 |           | Unequal - Optuna       | 81.47587511825922                | 88.20920854244099               |
-|           | Unequal - CAWPE        | TBC                              | TBC                             |
+|           | Unequal - CAWPE (fixed)| TBC                              | TBC                             |
+|           | Unequal - CAWPE (auto) | TBC                              | TBC                             |
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
