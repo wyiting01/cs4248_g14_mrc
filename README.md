@@ -75,7 +75,7 @@ python src/baseline/roberta.py --train_kf --data_path "data/curated/training_dat
 python src/baseline/xlnet.py --train --data_path "data/curated/training_data" --model_path "model/xlnet.pt"
 
 # testing:
-python src/baseline/xlnet.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output"
+python src/baseline/xlnet.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/xlnet_pred_top.json"
 
 # kfold
 python src/baseline/xlnet.py --train_kf --data_path "data/curated/training_data" --model_path "model/xlnet_kf.pt" --metric_path "intermediate/xlnet_kf_scores.json"
