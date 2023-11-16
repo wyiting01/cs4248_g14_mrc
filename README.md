@@ -225,7 +225,7 @@ To navigate around this repository, you can refer to the directory tree below:
 |    ├── unequal_weight_auto_pred.json
 |    ├── unequal_weight_equal_pred.json
 |    ├── roberta_pred.json
-|    └── xlnet_pred_top.json
+|    └── xlnet_pred.json
 ├── src
 |    ├── preprocessing.py
 |    ├── evaluate-v2.0.py
