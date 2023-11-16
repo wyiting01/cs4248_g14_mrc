@@ -192,8 +192,6 @@ To navigate around this repository, you can refer to the directory tree below:
 |    ├── xlnet_test.json
 |    ├── roberta_val.json
 |    ├── roberta_test.json
-|    ├── bilstm_metrics.json
-|    ├── bilstm_scores.json
 |    ├── xlnet_kf_scores.json
 |    └── roberta_kf_scores.json
 ├── model
