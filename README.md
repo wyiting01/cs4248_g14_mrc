@@ -159,8 +159,8 @@ python src/ensemble/ensemble_unequal.py --test --xlnet_dict "intermediate/xlnet_
 
 ### Max Voting
 
-```
-To add in
+This ensemble model aims to get the answer with the highest count from all 3 models (XLNet, biLSTM & BERT) and output it as the combined answer. Tiebreaking via accuracy of model - XLNet, then biLSTM, then BERT.
+python src/ensemble/max_vote.py --data_path data/curated/test_data --bert_path src/baseline/bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path output/maxVoteAns.json
 ```
 
 ```
