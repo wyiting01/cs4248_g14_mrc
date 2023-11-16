@@ -1,11 +1,19 @@
 '''
-Run Train and test, Single Holdout
-python3 src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path model.pt
-python3 src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
-python3 src/bilstm_bert.py --train --test --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --output_path src/bilstm_pred.json --score_path src/bilstm_scores.json
+Need to install libraries for hyperopt, numpy, sklearn, transformers:
 
-Run KFolds 
-python3 src/bilstm_bert.py --train_kf --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model.pt  --metric_path src/bilstm_metrics.json
+pip install hyperopt
+pip install numpy
+pip install torch
+pip install -U scikit-learn
+pip install transformers
+
+Run Train and test, Single Holdout (From main folder cs4248_g14_mrc)
+python3 src/baseline/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path model/bilstm.pt
+python3 src/baseline/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path model/bilstm.pt  --output_path output/bilstm_pred.json --score_path output/bilstm_scores.json
+python3 src/baseline/bilstm_bert.py --train --test --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model/bilstm.pt  --output_path output/bilstm_pred.json --score_path output/bilstm_scores.json
+
+Run KFolds
+python3 src/baseline/bilstm_bert.py --train_kf --train_path data/curated/training_data/ --test_path data/curated/test_data/ --model_path model/bilstm.pt  --metric_path output/bilstm_metrics.json
 
 '''
 import argparse
@@ -26,23 +34,6 @@ from sklearn.model_selection import KFold
 from torch.utils.data import Dataset, DataLoader, Subset
 from torch.nn.utils.rnn import pad_sequence
 from transformers import BertTokenizerFast, BertModel
-
-'''
-Need to install libraries for hyperopt, numpy, sklearn, transformers:
-
-pip install hyperopt
-pip install numpy
-pip install torch
-pip install -U scikit-learn
-pip install transformers
-
-(From main folder cs4248_g14_mrc)
-To train, use command:
-python src/bilstm_bert.py --train --train_path data/curated/training_data/ --model_path bilstm.pt
-
-To test, use command:
-python src/bilstm_bert.py --test --test_path data/curated/test_data/ --model_path bilstm.pt
-'''
 
 # Default hyperparameters
 hidden_dim=64
@@ -92,12 +83,12 @@ class biLSTMDataset(Dataset):
             # Initially cannot split because of how k fold works.
             self.spans = [span.split() for span in self.spans]
 
-        # Acitvate for debugging
-        # self.contexts = self.contexts[:5]
-        # self.questions = self.questions[:5]
-        # self.answers = self.answers[:5]
-        # self.spans = self.spans[:5]
-        # self.question_ids = self.question_ids[:5]
+        # Activate for debugging
+        #self.contexts = self.contexts[:5]
+        #self.questions = self.questions[:5]
+        #self.answers = self.answers[:5]
+        #self.spans = self.spans[:5]
+        #self.question_ids = self.question_ids[:5]
 
         self.encodings = self.tokenizer(self.questions,
                                         self.contexts,
@@ -422,90 +413,8 @@ def calc_f1(p, t):
     f1 = 2 * (precision * recall) / (precision + recall)
     return f1
 
-## test based on scores
-def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
-    model.eval()
-    test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-
-    pred = {}
-    scores = {}
-    metrics = {}
-
-    correct_pred = 0
-    f1_scores = []
-
-    print("Final testing on Test Dataset...")
-    with torch.no_grad():
-        for i, batch in enumerate(test_loader):
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            start_positions = batch["start_positions"].to(device)
-            end_positions = batch["end_positions"].to(device)
-            
-            question_ids = batch["question_ids"]
-            contexts = batch["contexts"]
-            offset_mappings = batch["offset_mappings"]
-            correct_answers = batch["correct_answers"]
-
-            start_logits, end_logits = model(input_ids, attention_mask)
-            
-            n = len(input_ids)
-
-            for i in range(len(input_ids)):
-                qid = question_ids[i]
-                ctxt = contexts[i]
-                start_logit = F.softmax(start_logits[i], dim=0).cpu().detach().numpy()
-                end_logit = F.softmax(end_logits[i], dim=0).cpu().detach().numpy()
-                offset = offset_mappings[i]
-                correct_ans = correct_answers[i]
-                answers = []
-
-                for start_index in range(len(start_logit)):
-                    for end_index in range(start_index, len(end_logit)):
-                        if start_index <= end_index: # for each valid span
-                            score = start_logit[start_index] + end_logit[end_index]
-                            start_char = offset[start_index][0]
-                            end_char = offset[end_index][1]
-                            answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
-
-                # sort by top scores
-                answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
-        
-                # output only the top answer
-                if len(answers) > 0:
-                    top_answer = answers[0][3]
-                    pred[qid] = top_answer
-
-                    # Save all n_best_size answers' scores
-                        # Initialize the dictionary structure for each qid
-                    if qid not in scores:
-                        scores[qid] = {"start": {}, "end": {}, "answers": correct_ans, "context": ctxt}
-                    
-                    for idx, logit in enumerate(start_logit):
-                        scores[qid]["start"][offset[idx][0]] = logit
-                    for idx, logit in enumerate(end_logit):
-                        scores[qid]["end"][offset[idx][1]] = logit
-                    scores[qid]["answers"] = correct_ans
-                    scores[qid]["context"] = ctxt
-                    
-                    # Calculate accuracy
-                    if top_answer == correct_ans:
-                        correct_pred += 1
-
-                    # Calculate F1 score
-                    f1 = calc_f1(top_answer, correct_ans)
-                    f1_scores.append(f1)
-                    
-                else:
-                    pred[qid] = ""
-                    scores[qid] = []
-    
-    metrics['acc'] = correct_pred / n
-    metrics['f1'] = sum(f1_scores) / n
-                
-    return pred, scores, metrics
-
 def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, num_epoch=num_epoch, device='cpu', model_path=None):
+    print("Beginning training...")
     train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()  # Since we're predicting start and end positions
@@ -559,6 +468,91 @@ def train(model, dataset, batch_size=batch_size, learning_rate=learning_rate, nu
     print('Model saved in ', model_path)
     print('Training finished in {} minutes.'.format((end - start).seconds / 60.0))
     return {'loss': total_loss/len(train_loader)}
+
+## test based on scores
+def test_eval(model, dataset, n_best_size=n_best_size, device='cpu'):
+    model.eval()
+    test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+    pred = {}
+    scores = {}
+    metrics = {}
+
+    correct_pred = 0
+    f1_scores = []
+
+    n = len(dataset.contexts)
+
+    print("Final testing on Test Dataset...")
+    with torch.no_grad():
+        for batch in test_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            start_positions = batch["start_positions"].to(device)
+            end_positions = batch["end_positions"].to(device)
+            
+            question_ids = batch["question_ids"]
+            contexts = batch["contexts"]
+            offset_mappings = batch["offset_mappings"]
+            correct_answers = batch["correct_answers"]
+
+            start_logits, end_logits = model(input_ids, attention_mask)
+
+            for j in range(len(question_ids)):
+                qid = question_ids[j]
+                ctxt = contexts[j]
+                start_logit = F.softmax(start_logits[j], dim=0).cpu().detach().numpy()
+                end_logit = F.softmax(end_logits[j], dim=0).cpu().detach().numpy()
+                offset = offset_mappings[j]
+                correct_ans = correct_answers[j]
+                answers = []
+
+                for start_index in range(len(start_logit)):
+                    for end_index in range(start_index, len(end_logit)):
+                        if start_index <= end_index: # for each valid span
+                            score = start_logit[start_index] + end_logit[end_index]
+                            start_char = offset[start_index][0]
+                            end_char = offset[end_index][1]
+                            answers.append((score, start_index, end_index, ctxt[start_char:end_char]))
+
+                # sort by top scores
+                answers = sorted(answers, key=lambda x: x[0], reverse=True)[:n_best_size]
+        
+                # output only the top answer
+                if len(answers) > 0:
+                    top_answer = answers[0][3]
+                    pred[qid] = top_answer
+
+                    # Save all n_best_size answers' scores
+                        # Initialize the dictionary structure for each qid
+                    if qid not in scores:
+                        scores[qid] = {"start": {}, "end": {}, "answers": correct_ans, "context": ctxt}
+                    
+                    for idx, logit in enumerate(start_logit):
+                        scores[qid]["start"][offset[idx][0]] = logit
+                    for idx, logit in enumerate(end_logit):
+                        scores[qid]["end"][offset[idx][1]] = logit
+                    scores[qid]["answers"] = correct_ans
+                    scores[qid]["context"] = ctxt
+                    
+                    # Calculate accuracy
+                    if top_answer == correct_ans:
+                        correct_pred += 1
+
+                    # Calculate F1 score
+                    f1 = calc_f1(top_answer, correct_ans)
+                    f1_scores.append(f1)
+                else:
+                    if qid not in scores:
+                        scores[qid] = {"start": {}, "end": {}, "answers": " ", "context": ctxt}
+                    pred[qid] = " "
+                    scores[qid]["answers"] = " "
+                    scores[qid]["context"] = ctxt
+    
+    metrics['acc'] = correct_pred / n
+    metrics['f1'] = sum(f1_scores) / n
+                
+    return pred, scores, metrics
 
 def cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path, batch_size=batch_size, collate_fn=collate_fn): 
     print(f"Processing fold {fold + 1}...")

@@ -1,3 +1,19 @@
+'''
+Need to install libraries for hyperopt, numpy, sklearn, transformers, BERT:
+
+pip install hyperopt
+pip install numpy
+pip install torch
+pip install -U scikit-learn
+pip install transformers
+pip install pytorch_transformers
+
+To run this file, use the command:
+python src/ensemble/max_vote.py --data_path data/curated/test_data --bert_path src/baseline/bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path output/maxVoteAns.json
+
+(Note: This is from main folder cs4248_g14_mrc, paths will change relative to where you run the command from.)
+'''
+
 import argparse
 import datetime
 import json
@@ -17,22 +33,6 @@ from bert.bert_model import QA
 from bilstm_bert import *
 from collections import Counter
 from xlnet import SquadDataset
-
-'''
-Need to install libraries for hyperopt, numpy, sklearn, transformers, BERT:
-
-pip install hyperopt
-pip install numpy
-pip install torch
-pip install -U scikit-learn
-pip install transformers
-pip install pytorch_transformers
-
-(From main folder cs4248_g14_mrc)
-
-To run this file, use the command:
-python src/max_vote.py --data_path data/curated/test_data --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path allMaxVoteAns.json --final_output_path maxVoteAns.json
-'''
 
 torch.manual_seed(0)
 
@@ -177,7 +177,8 @@ def predict(xlnetDataset, xlnet_model, bilstm_dataset, bilstm_model, n_best_size
                 for i in range(n_best_size):
                     predictions.append(bert_pred[i]['answer'])
 
-                bilstm_preds = quesAns[qid]
+                if quesAns[qid]:
+                    bilstm_preds = quesAns[qid]
                 predictions += bilstm_preds
 
                 predictions += valid_answers
