@@ -25,8 +25,7 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 |           | RoBERTa                | 81.20151371807                   | 88.41621816924753               |
 |           | XLNet                  | 75.34531693472091                | 84.06374401013184               |
 |           | biLSTM                 | 74.41882991088725                | 82.48893567082695               | 
-| ENSEMBLE  | Max Voting             | TBC                              | TBC                             |
-|           | Equal - Maximum        | 78.89309366130558                | 86.70557785319596               |
+| ENSEMBLE  | Equal - Maximum        | 78.89309366130558                | 86.70557785319596               |
 |           | Equal - Multiplicative | 82.19489120151371                | 88.9101732833653                |
 |           | Unequal - Optuna       | 81.47587511825922                | 88.20920854244099               |
 |           | Unequal - CAWPE (fixed)| 82.42194891201514                | 88.96254477083748               |
@@ -154,12 +153,6 @@ python src/baseline/xlnet.py --train_kf --data_path "data/curated/training_data"
 python src/ensemble/ensemble_unequal.py --test --xlnet_dict "intermediate/xlnet_test.json" --roberta_dict "intermediate/roberta_test.json" --xlnet_acc "intermediate/xlnet_kf_scores.json" --roberta_acc "intermediate/roberta_kf_scores.json" --output_path "output"
 ```
 
-### Max Voting
-This ensemble model aims to get the answer with the highest count from all 3 models (XLNet, biLSTM & BERT) and output it as the combined answer. Tiebreaking via accuracy of model - XLNet, then biLSTM, then BERT.
-```
-python src/ensemble/max_vote.py --data_path data/curated/test_data --bert_path src/baseline/bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path output/maxVoteAns.json
-```
-
 ## Directory Structure
 To navigate around this repository, you can refer to the directory tree below:
 
@@ -218,7 +211,6 @@ To navigate around this repository, you can refer to the directory tree below:
 |    ├── ensemble_max_pred.json
 |    ├── ensemble_mul_pred.json
 |    ├── ensemble_optuna_pred.json
-|    ├── ensemble_max_voting_pred.json
 |    ├── unequal_weight_fixed_pred.json
 |    ├── unequal_weight_auto_pred.json
 |    ├── roberta_pred.json
@@ -236,8 +228,7 @@ To navigate around this repository, you can refer to the directory tree below:
 |         ├── ensemble_equal_weighting.py
 |         ├── ensemble_optuna.ipynb
 |         ├── ensemble_unequal_optuna.py
-|         ├── ensemble_unequal.py
-|         └── max_vote.py
+|         └── ensemble_unequal.py
 └── README.md
 ```
 
