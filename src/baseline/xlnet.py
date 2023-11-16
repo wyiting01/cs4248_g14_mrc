@@ -231,6 +231,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
     test_dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
 
+    pred_all = {}
     pred_top = {}
 
     metrics = {}
@@ -295,8 +296,10 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
 
                 valid_answers = dict(sorted(valid_answers.items(), key=lambda x: float(x[1]), reverse=True)[:n_best_size])
                 if len(valid_answers) == 0:
+                    pred_all[qid] = {}
                     pred_top[qid] = ""
                 else:
+                    pred_all[qid] = valid_answers
                     pred_top[qid] = next(iter(valid_answers))
 
                 # Calculate accuracy
@@ -311,7 +314,7 @@ def test(model, dataset, n_best_size=20, max_answer_length=30, device='cpu'):
     metrics['acc'] = correct_pred / len(f1_scores)
     metrics['f1'] = sum(f1_scores) / len(f1_scores)
 
-    return pred_top, metrics
+    return pred_all, pred_top, metrics
 
 def cross_val_worker(fold, train_index, test_index, dataset, model, device, model_path=None, batch_size=16, collate_fn=None): 
     print(f"Processing fold {fold + 1}...")
@@ -354,9 +357,13 @@ def main(args):
         max_answer_length = 30
 
         # use trained model to make predictions
-        pred_top, metrics = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
+        pred_all, pred_top, metrics = test(model=model, dataset=squad_test, n_best_size=n_best_size, max_answer_length=max_answer_length, device=device)
+    
+        # write model prediction into json file
+        with open(output_path + "/xlnet_pred_all.json", 'w') as f:
+            json.dump(pred_all, f)
 
-        with open(output_path, 'w') as f:
+        with open(output_path + "/xlnet_pred_top.json", 'w') as f:
             json.dump(pred_top, f)
 
         print('Model predictions saved in ', output_path)

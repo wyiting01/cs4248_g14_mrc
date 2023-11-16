@@ -6,14 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-import sys
-import os
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-ancestor_relative_path = os.path.join('..', 'baseline')
-ancestor_abs_path = os.path.abspath(os.path.join(current_dir, ancestor_relative_path))
-sys.path.append(ancestor_abs_path)
-
 from roberta import RobertaTokenizerFast, RobertaForQuestionAnswering, SquadDataset as robertSquadDataset
 from xlnet import XLNetForQuestionAnswering, XLNetTokenizerFast, SquadDataset as xlnetSquadDataset
 

@@ -33,7 +33,7 @@ The table below reports the Exact and F1 scores evaluted from the official SQuAD
 
 To run the evaluation script with model predictions `pred.json`, simply run the command below:
 ```
-python src/evaluate-v2.0.py data/raw/dev-v1.1.json output/pred.json
+python src/evaluate-v2.0.py data/raw/dev-v1.1.json pred.json
 ```
 > Note that `pred.json` can be replaced with any output json files containing the predictions of your target model found in `output/`
 
@@ -61,6 +61,9 @@ python src/baseline/roberta.py --train --data_path "data/curated/training_data" 
 
 # testing:
 python src/baseline/roberta.py --test --data_path "data/curated/test_data" --model_path "model/roberta.pt" --output_path "output/roberta_pred.json"
+
+# kfold
+python src/baseline/roberta.py --train_kf --data_path "data/curated/training_data" --model_path "model/roberta_kf.pt" --metric_path "intermediate/roberta_kf_scores.json"
 ```
 
 ### 3. XLNet
@@ -72,7 +75,10 @@ python src/baseline/roberta.py --test --data_path "data/curated/test_data" --mod
 python src/baseline/xlnet.py --train --data_path "data/curated/training_data" --model_path "model/xlnet.pt"
 
 # testing:
-python src/baseline/xlnet.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output/xlnet_pred_top.json"
+python src/baseline/xlnet.py --test --data_path "data/curated/test_data" --model_path "model/xlnet.pt" --output_path "output"
+
+# kfold
+python src/baseline/xlnet.py --train_kf --data_path "data/curated/training_data" --model_path "model/xlnet_kf.pt" --metric_path "intermediate/xlnet_kf_scores.json"
 ```
 
 ### 4. biLSTM
@@ -85,6 +91,9 @@ python src/baseline/bilstm_bert.py --train --train_path "data/curated/training_d
 
 # testing
 python src/baseline/bilstm_bert.py --test --test_path "data/curated/test_data" --model_path "model/bilstm.pt" --output_path "output/bilstm_pred.json" --score_path "intermediate/bilstm_scores.json"
+
+# kfold
+python src/baseline/bilstm_bert.py --train_kf --train_path "data/curated/training_data" --model_path "model/bilstm.pt" --metric_path "intermediate/bilstm_metrics.json"
 ```
 
 ## Ensemble Models
@@ -145,22 +154,19 @@ python src/ensemble/ensemble_unequal_optuna.py --test --xlnet_dict "intermediate
 In this approach, we follow the unequal weighting scheme as proposed in the cross-validation accuracy weighted probabilistic ensemble (CAWPE). We used k-fold CV to obtain an averaged accuracy metric, which are then exponentiated by a chosen alpha value to magnify differences in competence of each model.
 
 ```
-# perform kfold for participating baseline models
-python src/baseline/roberta.py --train_kf --data_path "data/curated/training_data" --model_path "model/roberta_kf.pt" --metric_path "intermediate/roberta_kf_scores.json"
-python src/baseline/xlnet.py --train_kf --data_path "data/curated/training_data" --model_path "model/xlnet_kf.pt" --metric_path "intermediate/xlnet_kf_scores.json"
-python src/baseline/bilstm_bert.py --train_kf --train_path "data/curated/training_data" --model_path "model/bilstm.pt" --metric_path "intermediate/bilstm_metrics.json"
-
-# perform weighitng based on kfold average accuracy
 python src/ensemble/ensemble_unequal.py --test --xlnet_dict "intermediate/xlnet_test.json" --roberta_dict "intermediate/roberta_test.json" --xlnet_acc "intermediate/xlnet_kf_scores.json" --roberta_acc "intermediate/roberta_kf_scores.json" --output_path "output"
 ```
 
 ### Max Voting
+
 This ensemble model aims to get the answer with the highest count from all 3 models (XLNet, biLSTM & BERT) and output it as the combined answer. Tiebreaking via accuracy of model - XLNet, then biLSTM, then BERT.
 python src/ensemble/max_vote.py --data_path data/curated/test_data --bert_path src/baseline/bert/model --xlnet_model model/xlnet.pt --bilstm_model model/bilstm.pt --output_path output/maxVoteAns.json
 ```
 
+```
 ## Directory Structure
 To navigate around this repository, you can refer to the directory tree below:
+```
 
 ```
 ├── data
@@ -193,15 +199,6 @@ To navigate around this repository, you can refer to the directory tree below:
 |              ├── context
 |              ├── question
 |              └── question_id
-├── intermediate
-|    ├── xlnet_val.json
-|    ├── xlnet_test.json
-|    ├── roberta_val.json
-|    ├── roberta_test.json
-|    ├── bilstm_metrics.json
-|    ├── bilstm_scores.json
-|    ├── xlnet_kf_scores.json
-|    └── roberta_kf_scores.json
 ├── model
 |    ├── bert_squad.pt
 |    ├── bilstm.pt
@@ -231,22 +228,31 @@ To navigate around this repository, you can refer to the directory tree below:
 |    |    ├── roberta.py
 |    |    ├── xlnet.py
 |    |    └── bert
-|    |          └── test.py
+|               └── test.py
 |    └── ensemble
 |         ├── ensemble_equal_weighting.py
 |         ├── ensemble_optuna.ipynb
 |         ├── ensemble_unequal_optuna.py
 |         ├── ensemble_unequal.py
 |         └── max_vote.py
+├── intermediate
+|    ├── xlnet_val.json
+|    ├── xlnet_test.json
+|    ├── roberta_val.json
+|    ├── roberta_test.json
+|    ├── bilstm_metrics.json
+|    ├── bilstm_scores.json
+|    ├── xlnet_kf_scores.json
+|    └── roberta_kf_scores.json
 └── README.md
 ```
 
 ## Folder Contents:
 1. **data/** : This folder consists of all the raw and processed data for training and evaluation
-2. **intermediate/** : This folder consists of all the intermediate outputs that are generated.
-3. **model/** : This folder consists of all model weights for our models (baseline) mentioned above
-4. **output/** : This folder consists of all the predictions output by each model (baseline and ensemble) mentioned above
-5. **src/** : This folder consists of the code needed for this entire project - preprocessing, individual models, ensemble models, and official evaluation script from SQuAD.
+2. **model/** : This folder consists of all model weights for our models mentioned above
+3. **output/** : This folder consists of all the predictions output by each model mentioned above
+4. **src/** : This folder consists of the code needed for this entire project - preprocessing, individual model, ensemble model, and official evaluation script from SQuAD.
+5. **intermediate/** : This folder consists of all the intermediate outputs that is generated.
 
 ## References:
 1. [Hugging Face Preprocessing for Modeling](https://huggingface.co/docs/transformers/tasks/question_answering)
