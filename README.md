@@ -225,7 +225,7 @@ To navigate around this repository, you can refer to the directory tree below:
 |    |    └── bert
 |    |          └── test.py
 |    └── ensemble
-|         ├── ensemble_equal_weighting.py
+|         ├── ensemble_equal.py
 |         ├── ensemble_optuna.ipynb
 |         ├── ensemble_unequal_optuna.py
 |         └── ensemble_unequal.py
