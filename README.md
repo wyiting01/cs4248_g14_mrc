@@ -46,8 +46,7 @@ python src/evaluate-v2.0.py data/raw/dev-v1.1.json output/pred.json
 - Model: [BERT-SQuAD](https://github.com/kamalkraj/BERT-SQuAD/tree/master)
 
 ```
-# training:
-Using pretrained weights
+# training: Using pretrained weights
 
 # testing:
 python src/baseline/bert/test.py --test --question_input "data/curated/test_data/question" --context_input "data/curated/test_data/context" --output_file "output/bert_squad_pred.json"
